@@ -1,6 +1,5 @@
 \documentclass[12pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
+\usepackage{fontspec}
 \usepackage[spanish]{babel}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
@@ -93,6 +92,85 @@ Grande & 200000 & 42 \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\section{Glosario}
+
+\begin{itemize}
+\item \textbf{n (ciudades):} cuántos puntos debe visitar el tour. Probamos con
+20, 2000 y 200000. Más ciudades = problema más grande, no mejor resultado.
+\item \textbf{Hormigas ($m$):} cada hormiga construye un tour completo distinto
+en cada iteración. Más hormigas = se prueban más opciones por ronda, pero cada
+ronda tarda más. Usamos 20--25.
+\item \textbf{Iteraciones ($t$):} cuántas rondas juega la colonia. En cada
+ronda las hormigas construyen tours y la mejor deja feromona. Más rondas no
+siempre ayudan: si la curva de convergencia ya está plana, sobran.
+\item \textbf{k (candidatos):} de cuántas vecinas cercanas puede escoger cada
+paso. Con $k = 25$ la hormiga solo mira sus 25 vecinas más próximas en vez de
+las 2000 ciudades: es el atajo que hace rápido al algoritmo. Con $k = 0$ mira
+todas (lento).
+\item \textbf{Semilla (seed):} número que fija el azar. Con semilla 42 los
+puntos y las decisiones aleatorias salen siempre iguales: así cualquiera puede
+repetir el experimento y obtener lo mismo.
+\item \textbf{Alpha ($\alpha$):} cuánto obedece la hormiga a la feromona (la
+experiencia de la colonia). Alto = todas copian las rutas marcadas.
+\item \textbf{Beta ($\beta$):} cuánto obedece a la cercanía (ir al vecino
+próximo). Alto = todas van a lo más cercano sin aprender.
+\item \textbf{Rho ($\rho$):} cuánto se evapora la feromona por ronda (usamos
+0,1, o sea se pierde el 10\,\%). Es el olvido que evita quedarse pegado a las
+primeras rutas.
+\item \textbf{Tau (feromona):} el puntaje que la colonia le pone a cada camino
+según lo buenos que salieron los tours que lo usaron. Más puntaje = más
+hormigas lo elegirán después.
+\item \textbf{Eta (heurística):} $1/\text{distancia}$: un camino corto tiene
+puntaje alto desde el inicio, antes de que la colonia aprenda nada.
+\item \textbf{Tour:} el recorrido completo que visita cada ciudad una vez y
+vuelve al inicio.
+\item \textbf{Longitud:} la distancia total del tour. Es lo que se quiere
+minimizar; números más chicos = mejor solución (solo comparables con el mismo
+$n$ y la misma semilla).
+\item \textbf{2-opt:} arreglo final que prueba a reconectar pares de caminos
+cruzados; si el tour se acorta, se queda con el cambio. Explica buena parte de
+la calidad obtenida.
+\item \textbf{Modo full:} el ACO normal con la tabla completa de distancias.
+Solo cabe en memoria hasta algunos miles de ciudades.
+\item \textbf{Modo hier:} el modo por partes para 200000 ciudades: parte el
+mapa en cuadros, resuelve cada cuadro por separado y pega los recorridos.
+\item \textbf{Celda o cluster:} cada cuadro del mapa partido. En nuestro caso
+361 cuadros de $\approx 550$ ciudades.
+\item \textbf{G:} en cuántas partes se divide cada lado del mapa ($19 \times
+19$ en nuestro caso).
+\item \textbf{Target-cluster:} tamaño de cuadro deseado ($\approx 600$
+ciudades). Cuadros más chicos = más rápido pero uniones más bruscas.
+\item \textbf{time\_ms:} tiempo que tardó el experimento, en milésimas de
+segundo. Depende del computador.
+\item \textbf{peak\_kb:} máxima memoria usada, en kilobytes. Depende del
+computador, pero el orden de magnitud ($O(n^2)$ vs $O(n)$) no.
+\item \textbf{matrix\_mb\_est:} cuánta memoria pediría la tabla completa de
+distancias. Para 200000 marca $\approx 152588$ MB: la prueba de que el modo
+normal es imposible ahí.
+\item \textbf{C++:} el lenguaje en que se escribió el programa. Se eligió
+porque es compilado (rápido): un experimento que en Python tardaría minutos
+aquí tarda segundos.
+\item \textbf{Compilar:} traducir el código a un programa ejecutable antes de
+correrlo. Es el paso \texttt{g++ ... -o aco} o \texttt{cmake --build}.
+\item \textbf{OpenMP:} la herramienta que reparte las hormigas entre los
+núcleos del procesador para construir tours en paralelo. Se importa porque
+con 12 núcleos el experimento corre $\approx 12$ veces más rápido; no cambia
+los resultados, solo el tiempo.
+\item \textbf{Núcleo / hilo:} cada núcleo es un trabajador del procesador.
+Con 12 núcleos, 12 hormigas avanzan al mismo tiempo en vez de una por una.
+\item \textbf{CMake:} la receta que automatiza la compilación (qué archivos
+compilar y con qué opciones), para no escribir el comando largo a mano.
+\item \textbf{Cronómetro (\texttt{chrono}):} el temporizador interno del
+programa: anota la hora al empezar y al terminar cada experimento.
+\item \textbf{getrusage:} el medidor interno de memoria: pregunta al sistema
+cuál fue el pico máximo de RAM del programa.
+\item \textbf{CSV:} tabla en texto plano (valores separados por comas) donde
+el programa guarda cada resultado: \texttt{results.csv},
+\texttt{scaling.csv}, \texttt{sensibilidad.csv} y las trazas.
+\item \textbf{Matplotlib:} la herramienta que convierte esos CSV en las
+gráficas de este informe.
+\end{itemize}
 
 % ---------------- 3 ----------------
 \section{Punto 1. Formulación del problema}
@@ -361,87 +439,6 @@ python3 scripts/plot_extra.py   # genera las gráficas en img/
 
 Los detalles de cada comando están en el \texttt{README} del repositorio.
 
-\section{Glosario: qué significa cada cosa}
-
-Esta sección es para quien no programa: cada término del experimento
-explicado en palabras simples.
-
-\begin{itemize}
-\item \textbf{n (ciudades):} cuántos puntos debe visitar el tour. Probamos con
-20, 2000 y 200000. Más ciudades = problema más grande, no mejor resultado.
-\item \textbf{Hormigas ($m$):} cada hormiga construye un tour completo distinto
-en cada iteración. Más hormigas = se prueban más opciones por ronda, pero cada
-ronda tarda más. Usamos 20--25.
-\item \textbf{Iteraciones ($t$):} cuántas rondas juega la colonia. En cada
-ronda las hormigas construyen tours y la mejor deja feromona. Más rondas no
-siempre ayudan: si la curva de convergencia ya está plana, sobran.
-\item \textbf{k (candidatos):} de cuántas vecinas cercanas puede escoger cada
-paso. Con $k = 25$ la hormiga solo mira sus 25 vecinas más próximas en vez de
-las 2000 ciudades: es el atajo que hace rápido al algoritmo. Con $k = 0$ mira
-todas (lento).
-\item \textbf{Semilla (seed):} número que fija el azar. Con semilla 42 los
-puntos y las decisiones aleatorias salen siempre iguales: así cualquiera puede
-repetir el experimento y obtener lo mismo.
-\item \textbf{Alpha ($\alpha$):} cuánto obedece la hormiga a la feromona (la
-experiencia de la colonia). Alto = todas copian las rutas marcadas.
-\item \textbf{Beta ($\beta$):} cuánto obedece a la cercanía (ir al vecino
-próximo). Alto = todas van a lo más cercano sin aprender.
-\item \textbf{Rho ($\rho$):} cuánto se evapora la feromona por ronda (usamos
-0,1, o sea se pierde el 10\,\%). Es el olvido que evita quedarse pegado a las
-primeras rutas.
-\item \textbf{Tau (feromona):} el puntaje que la colonia le pone a cada camino
-según lo buenos que salieron los tours que lo usaron. Más puntaje = más
-hormigas lo elegirán después.
-\item \textbf{Eta (heurística):} $1/\text{distancia}$: un camino corto tiene
-puntaje alto desde el inicio, antes de que la colonia aprenda nada.
-\item \textbf{Tour:} el recorrido completo que visita cada ciudad una vez y
-vuelve al inicio.
-\item \textbf{Longitud:} la distancia total del tour. Es lo que se quiere
-minimizar; números más chicos = mejor solución (solo comparables con el mismo
-$n$ y la misma semilla).
-\item \textbf{2-opt:} arreglo final que prueba a reconectar pares de caminos
-cruzados; si el tour se acorta, se queda con el cambio. Explica buena parte de
-la calidad obtenida.
-\item \textbf{Modo full:} el ACO normal con la tabla completa de distancias.
-Solo cabe en memoria hasta algunos miles de ciudades.
-\item \textbf{Modo hier:} el modo por partes para 200000 ciudades: parte el
-mapa en cuadros, resuelve cada cuadro por separado y pega los recorridos.
-\item \textbf{Celda o cluster:} cada cuadro del mapa partido. En nuestro caso
-361 cuadros de $\approx 550$ ciudades.
-\item \textbf{G:} en cuántas partes se divide cada lado del mapa ($19 \times
-19$ en nuestro caso).
-\item \textbf{Target-cluster:} tamaño de cuadro deseado ($\approx 600$
-ciudades). Cuadros más chicos = más rápido pero uniones más bruscas.
-\item \textbf{time\_ms:} tiempo que tardó el experimento, en milésimas de
-segundo. Depende del computador.
-\item \textbf{peak\_kb:} máxima memoria usada, en kilobytes. Depende del
-computador, pero el orden de magnitud ($O(n^2)$ vs $O(n)$) no.
-\item \textbf{matrix\_mb\_est:} cuánta memoria pediría la tabla completa de
-distancias. Para 200000 marca $\approx 152588$ MB: la prueba de que el modo
-normal es imposible ahí.
-\item \textbf{C++:} el lenguaje en que se escribió el programa. Se eligió
-porque es compilado (rápido): un experimento que en Python tardaría minutos
-aquí tarda segundos.
-\item \textbf{Compilar:} traducir el código a un programa ejecutable antes de
-correrlo. Es el paso \texttt{g++ ... -o aco} o \texttt{cmake --build}.
-\item \textbf{OpenMP:} la herramienta que reparte las hormigas entre los
-núcleos del procesador para construir tours en paralelo. Se importa porque
-con 12 núcleos el experimento corre $\approx 12$ veces más rápido; no cambia
-los resultados, solo el tiempo.
-\item \textbf{Núcleo / hilo:} cada núcleo es un trabajador del procesador.
-Con 12 núcleos, 12 hormigas avanzan al mismo tiempo en vez de una por una.
-\item \textbf{CMake:} la receta que automatiza la compilación (qué archivos
-compilar y con qué opciones), para no escribir el comando largo a mano.
-\item \textbf{Cronómetro (\texttt{chrono}):} el temporizador interno del
-programa: anota la hora al empezar y al terminar cada experimento.
-\item \textbf{getrusage:} el medidor interno de memoria: pregunta al sistema
-cuál fue el pico máximo de RAM del programa.
-\item \textbf{CSV:} tabla en texto plano (valores separados por comas) donde
-el programa guarda cada resultado: \texttt{results.csv},
-\texttt{scaling.csv}, \texttt{sensibilidad.csv} y las trazas.
-\item \textbf{Matplotlib:} la herramienta que convierte esos CSV en las
-gráficas de este informe.
-\end{itemize}
 
 % ---------------- 6 ----------------
 \section{Punto 4. Evaluación experimental}
