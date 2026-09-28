@@ -345,76 +345,103 @@ Las hormigas de cada iteración se construyen en paralelo con OpenMP (reparte
 tiempo entre núcleos, no cambia el Big-O).
 
 % ---------------- 5 ----------------
-\section{Punto 3. Implementación y comandos de ejecución}
+\section{Punto 3. Implementación (resumen)}
 
-\subsection{Estructura del repositorio}
+El código está en \texttt{github.com/JAGR1792/ACO} (\texttt{src/} con el
+algoritmo en C++17 y \texttt{scripts/} con los experimentos). Todo el taller
+se reproduce con:
 
-\begin{itemize}
-\item \texttt{src/tsp.h}: instancia euclidiana, matriz densa, k-NN exacto.
-\item \texttt{src/aco.h}: solver MMAS + 2-opt.
-\item \texttt{src/main.cpp}: CLI, modos, particionado en rejilla, salida CSV.
-\item \texttt{src/metrics.h}: cronómetro (\texttt{chrono}) y pico de RAM (\texttt{getrusage}).
-\item \texttt{CMakeLists.txt}: compilación \texttt{Release -O3} con OpenMP.
-\item \texttt{scripts/run\_benchmark.sh}: corre los 3 casos y genera \texttt{results.csv}.
-\item \texttt{scripts/plot.py}: genera \texttt{img/benchmark.png}.
-\end{itemize}
-
-\subsection{Compilación}
-
-Vía CMake (recomendada):
 \begin{verbatim}
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
+bash scripts/run_benchmark.sh   # 20, 2000 y 200000 ciudades
+bash scripts/run_extra.sh       # escalamiento, k y convergencia
+python3 scripts/plot_extra.py   # genera las gráficas en img/
 \end{verbatim}
 
-Vía manual, sin cmake (un solo comando):
-\begin{verbatim}
-g++ -O3 -std=c++17 -fopenmp src/main.cpp -o aco
-\end{verbatim}
+Los detalles de cada comando están en el \texttt{README} del repositorio.
 
-\subsection{Comandos de ejecución}
+\section{Glosario: qué significa cada cosa}
 
-\begin{verbatim}
-# 20 ciudades: ACO completo
-./build/aco --n 20 --ants 20 --iters 100 --cand 8 \
-  --seed 42 --mode full
+Esta sección es para quien no programa: cada término del experimento
+explicado en palabras simples.
 
-# 2000 ciudades: ACO completo con 25 candidatos
-./build/aco --n 2000 --ants 25 --iters 50 --cand 25 \
-  --seed 42 --mode full --out results.csv
-
-# 200000 ciudades: ACO jerárquico (celdas de ~600 puntos)
-./build/aco --n 200000 --seed 42 --mode hier \
-  --target-cluster 600 --out results.csv
-
-# Benchmark completo + gráfica
-bash scripts/run_benchmark.sh
-python3 scripts/plot.py results.csv
-\end{verbatim}
-
-Parámetros: \texttt{--n} ciudades, \texttt{--ants} hormigas por iteración,
-\texttt{--iters} iteraciones, \texttt{--cand} vecinos candidatos
-(\texttt{0} = sin lista), \texttt{--seed} semilla, \texttt{--target-cluster}
-tamaño de celda en modo \texttt{hier}, \texttt{--out} archivo CSV,
-\texttt{--no-2opt} desactiva la mejora local.
-
-\subsection{Evidencia de ejecución}
-
-Figura 1: Salidas reales del programa en local.
-\begin{verbatim}
-n=20 mode=full ants=20 iters=100 seed=42 length=4460.31
-  time_ms=142.6 peak_kb=4452
-  matrix_mb_est=0.00 (solo modo full)
-
-n=2000 mode=full ants=25 iters=50 seed=42 length=38698.88
-  time_ms=1218.2 peak_kb=52028
-  matrix_mb_est=15.26 (solo modo full)
-
-[hier] n=200000 G=19 clusters=361
-n=200000 mode=hier ants=20 iters=100 seed=42 length=408901.41
-  time_ms=6988.3 peak_kb=74796
-  matrix_mb_est=152587.89 (solo modo full)
-\end{verbatim}
+\begin{itemize}
+\item \textbf{n (ciudades):} cuántos puntos debe visitar el tour. Probamos con
+20, 2000 y 200000. Más ciudades = problema más grande, no mejor resultado.
+\item \textbf{Hormigas ($m$):} cada hormiga construye un tour completo distinto
+en cada iteración. Más hormigas = se prueban más opciones por ronda, pero cada
+ronda tarda más. Usamos 20--25.
+\item \textbf{Iteraciones ($t$):} cuántas rondas juega la colonia. En cada
+ronda las hormigas construyen tours y la mejor deja feromona. Más rondas no
+siempre ayudan: si la curva de convergencia ya está plana, sobran.
+\item \textbf{k (candidatos):} de cuántas vecinas cercanas puede escoger cada
+paso. Con $k = 25$ la hormiga solo mira sus 25 vecinas más próximas en vez de
+las 2000 ciudades: es el atajo que hace rápido al algoritmo. Con $k = 0$ mira
+todas (lento).
+\item \textbf{Semilla (seed):} número que fija el azar. Con semilla 42 los
+puntos y las decisiones aleatorias salen siempre iguales: así cualquiera puede
+repetir el experimento y obtener lo mismo.
+\item \textbf{Alpha ($\alpha$):} cuánto obedece la hormiga a la feromona (la
+experiencia de la colonia). Alto = todas copian las rutas marcadas.
+\item \textbf{Beta ($\beta$):} cuánto obedece a la cercanía (ir al vecino
+próximo). Alto = todas van a lo más cercano sin aprender.
+\item \textbf{Rho ($\rho$):} cuánto se evapora la feromona por ronda (usamos
+0,1, o sea se pierde el 10\,\%). Es el olvido que evita quedarse pegado a las
+primeras rutas.
+\item \textbf{Tau (feromona):} el puntaje que la colonia le pone a cada camino
+según lo buenos que salieron los tours que lo usaron. Más puntaje = más
+hormigas lo elegirán después.
+\item \textbf{Eta (heurística):} $1/\text{distancia}$: un camino corto tiene
+puntaje alto desde el inicio, antes de que la colonia aprenda nada.
+\item \textbf{Tour:} el recorrido completo que visita cada ciudad una vez y
+vuelve al inicio.
+\item \textbf{Longitud:} la distancia total del tour. Es lo que se quiere
+minimizar; números más chicos = mejor solución (solo comparables con el mismo
+$n$ y la misma semilla).
+\item \textbf{2-opt:} arreglo final que prueba a reconectar pares de caminos
+cruzados; si el tour se acorta, se queda con el cambio. Explica buena parte de
+la calidad obtenida.
+\item \textbf{Modo full:} el ACO normal con la tabla completa de distancias.
+Solo cabe en memoria hasta algunos miles de ciudades.
+\item \textbf{Modo hier:} el modo por partes para 200000 ciudades: parte el
+mapa en cuadros, resuelve cada cuadro por separado y pega los recorridos.
+\item \textbf{Celda o cluster:} cada cuadro del mapa partido. En nuestro caso
+361 cuadros de $\approx 550$ ciudades.
+\item \textbf{G:} en cuántas partes se divide cada lado del mapa ($19 \times
+19$ en nuestro caso).
+\item \textbf{Target-cluster:} tamaño de cuadro deseado ($\approx 600$
+ciudades). Cuadros más chicos = más rápido pero uniones más bruscas.
+\item \textbf{time\_ms:} tiempo que tardó el experimento, en milésimas de
+segundo. Depende del computador.
+\item \textbf{peak\_kb:} máxima memoria usada, en kilobytes. Depende del
+computador, pero el orden de magnitud ($O(n^2)$ vs $O(n)$) no.
+\item \textbf{matrix\_mb\_est:} cuánta memoria pediría la tabla completa de
+distancias. Para 200000 marca $\approx 152588$ MB: la prueba de que el modo
+normal es imposible ahí.
+\item \textbf{C++:} el lenguaje en que se escribió el programa. Se eligió
+porque es compilado (rápido): un experimento que en Python tardaría minutos
+aquí tarda segundos.
+\item \textbf{Compilar:} traducir el código a un programa ejecutable antes de
+correrlo. Es el paso \texttt{g++ ... -o aco} o \texttt{cmake --build}.
+\item \textbf{OpenMP:} la herramienta que reparte las hormigas entre los
+núcleos del procesador para construir tours en paralelo. Se importa porque
+con 12 núcleos el experimento corre $\approx 12$ veces más rápido; no cambia
+los resultados, solo el tiempo.
+\item \textbf{Núcleo / hilo:} cada núcleo es un trabajador del procesador.
+Con 12 núcleos, 12 hormigas avanzan al mismo tiempo en vez de una por una.
+\item \textbf{CMake:} la receta que automatiza la compilación (qué archivos
+compilar y con qué opciones), para no escribir el comando largo a mano.
+\item \textbf{Cronómetro (\texttt{chrono}):} el temporizador interno del
+programa: anota la hora al empezar y al terminar cada experimento.
+\item \textbf{getrusage:} el medidor interno de memoria: pregunta al sistema
+cuál fue el pico máximo de RAM del programa.
+\item \textbf{CSV:} tabla en texto plano (valores separados por comas) donde
+el programa guarda cada resultado: \texttt{results.csv},
+\texttt{scaling.csv}, \texttt{sensibilidad.csv} y las trazas.
+\item \textbf{Matplotlib:} la herramienta que convierte esos CSV en las
+gráficas de este informe.
+\end{itemize}
 
 % ---------------- 6 ----------------
 \section{Punto 4. Evaluación experimental}
@@ -440,12 +467,12 @@ $n$ & Modo & Hormigas $\times$ iters & Longitud & Tiempo & Memoria pico \\
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/benchmark.png}
 
-Figura 2: Tiempo, memoria pico y longitud del tour para los tres tamaños.
+Figura 1: Tiempo, memoria pico y longitud del tour para los tres tamaños.
 \end{center}
 
-\subsection{Análisis de las gráficas (Figura 2)}
+\subsection{Análisis de las gráficas (Figura 1)}
 
-La Figura 2 tiene tres diagramas de barras, uno por métrica, con una barra por
+La Figura 1 tiene tres diagramas de barras, uno por métrica, con una barra por
 tamaño (20, 2000 y 200000). Se leen así:
 
 \textbf{Gráfica 1: Tiempo (s).} Las barras crecen de 0,14 s a 1,22 s y a 6,99
@@ -470,7 +497,7 @@ algoritmo sino tamaño de la instancia: cada barra viene de puntos aleatorios
 distintos, así que no se puede decir que una configuración sea mejor que otra
 comparando estas tres barras entre sí.
 
-\subsection{Convergencia por iteración (Figura 3)}
+\subsection{Convergencia por iteración (Figura 2)}
 
 Para obtener esta información se agregó la opción \texttt{--trace-out}, que
 guarda el mejor tour global al final de cada iteración (archivos
@@ -482,7 +509,7 @@ esto es para decidir el número de iteraciones en vez de adivinarlo.
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/convergencia.png}
 
-Figura 3: Mejor longitud global por iteración, n=20 y n=2000.
+Figura 2: Mejor longitud global por iteración, n=20 y n=2000.
 \end{center}
 
 Con $n = 20$ la curva baja de 4975 a 4460 (10,4\,\% de mejora) y se estabiliza
@@ -494,7 +521,7 @@ no superó al tour greedy inicial y el trabajo lo hizo la mejora local. El
 valor de saberlo es directo: para $n = 2000$ conviene invertir en más
 hormigas o más 2-opt y no en más iteraciones.
 
-\subsection{Escalamiento en tiempo y memoria (Figura 4)}
+\subsection{Escalamiento en tiempo y memoria (Figura 3)}
 
 Para obtener esta información se corrió el mismo experimento
 ($25$ hormigas $\times$ $50$ iters, $k = 25$, semilla 42) con
@@ -508,7 +535,7 @@ memoria antes de intentarlo.
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/escalamiento.png}
 
-Figura 4: Tiempo y memoria frente a $n$ (log-log) con referencias $O(n)$ y
+Figura 3: Tiempo y memoria frente a $n$ (log-log) con referencias $O(n)$ y
 $O(n^2)$, más el punto jerárquico de 200000.
 \end{center}
 
@@ -521,7 +548,7 @@ $200$ MB teóricos de matrices). El punto \texttt{hier} ($200000$ ciudades,
 $7$ s, $75$ MB) queda muy por debajo de ambas rectas: es la prueba empírica
 de que el particionado rompe el $O(n^2)$.
 
-\subsection{Sensibilidad a la lista de candidatos (Figura 5)}
+\subsection{Sensibilidad a la lista de candidatos (Figura 4)}
 
 Para obtener esta información se varió $k \in \{5, 15, 25, 50\}$ con
 $n = 2000$ y se añadió una corrida con $k = 25$ pero sin 2-opt, más una demo
@@ -533,7 +560,7 @@ justifica con datos la lista de candidatos en vez de usarla por fe.
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/candidatos.png}
 
-Figura 5: Tiempo y longitud según $k$ (n=2000), con variante sin 2-opt.
+Figura 4: Tiempo y longitud según $k$ (n=2000), con variante sin 2-opt.
 \end{center}
 
 La longitud es idéntica (38698,88) para $k = 5, 15, 25, 50$: esto significa
