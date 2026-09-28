@@ -56,10 +56,42 @@ los subtours ordenando las celdas por centroide con vecino más cercano.
 
 ## 3. Compilación
 
+### Requisitos
+
+- `g++` con soporte OpenMP (GCC en Linux ya lo trae; en macOS con clang hay que
+  instalar `libomp`, en Windows usar MinGW o WSL).
+- `cmake >= 3.16` (solo para la vía con CMake, opcional).
+- `python3 + matplotlib` (solo para la gráfica, opcional).
+
+### Vía CMake (recomendada)
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
+# ejecutable en ./build/aco
 ```
+
+### Vía manual (sin cmake)
+
+Un solo comando, sin dependencias de build:
+
+```bash
+g++ -O3 -std=c++17 -fopenmp src/main.cpp -o aco
+./aco --n 20 --ants 20 --iters 100 --cand 8 --seed 42 --mode full
+```
+
+(Verificado: el binario manual produce los mismos tours que el de CMake.
+Se usa `-O3` genérico a propósito para que compile igual en cualquier CPU;
+el CMakeLists añade `-march=native` solo como optimización extra local.)
+
+### Reproducibilidad
+
+- Sin rutas absolutas: todo es relativo al repo y las instancias se generan con
+  `--seed` fijo (mismo seed ⇒ mismos puntos ⇒ **misma longitud de tour** en
+  cualquier máquina y compilador).
+- Lo que **sí varía** entre máquinas: `time_ms` (CPU/núcleos) y `peak_kb`
+  (los hilos OpenMP reservan memoria según el sistema). Compara longitudes
+  entre máquinas, y tiempos/memoria solo dentro de la misma máquina.
 
 ## 4. Comandos de ejecución
 
