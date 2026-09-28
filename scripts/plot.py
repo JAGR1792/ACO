@@ -1,5 +1,6 @@
 import csv, sys, os
 import matplotlib.pyplot as plt
+plt.rcParams.update({"font.size": 14})
 
 csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "results.csv")
 rows = list(csv.DictReader(open(csv_path)))
@@ -12,7 +13,7 @@ peaks = [float(r["peak_kb"]) / 1024.0 for r in rows]
 lens = [float(r["length"]) for r in rows]
 modes = [r["mode"] for r in rows]
 
-fig, ax = plt.subplots(1, 3, figsize=(15, 4))
+fig, ax = plt.subplots(1, 3, figsize=(18, 6))
 
 ax[0].bar([str(n) + "\n" + m for n, m in zip(ns, modes)], times)
 ax[0].set_title("Tiempo (s)")

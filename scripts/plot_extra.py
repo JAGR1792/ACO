@@ -1,6 +1,7 @@
 """Graficas extra: convergencia, escalamiento y sensibilidad a k."""
 import csv, os
 import matplotlib.pyplot as plt
+plt.rcParams.update({"font.size": 14})
 
 BASE = os.path.join(os.path.dirname(__file__), "..")
 IMG = os.path.join(BASE, "img")
@@ -10,7 +11,7 @@ def read_csv(path):
         return list(csv.DictReader(f))
 
 # ---------- 1. Convergencia: mejor longitud vs iteracion ----------
-fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+fig, ax = plt.subplots(1, 2, figsize=(16, 6))
 for i, (trace, title) in enumerate([("trace_20.csv", "n=20 (20 hormigas x 100 iters)"),
                                     ("trace_2000.csv", "n=2000 (25 hormigas x 50 iters)")]):
     it, best = [], []
@@ -30,7 +31,7 @@ ns = [int(r["n"]) for r in scal]
 t = [float(r["time_ms"]) / 1000.0 for r in scal]
 mem = [float(r["peak_kb"]) / 1024.0 for r in scal]
 
-fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+fig, ax = plt.subplots(1, 2, figsize=(16, 6))
 ax[0].loglog(ns, t, "o-", label="full (25x50, k=25)")
 ax[0].loglog([200000], [6.988], "s", label="hier (200000)")
 ax[0].set_title("Tiempo vs n"); ax[0].set_xlabel("n (ciudades)"); ax[0].set_ylabel("segundos")
@@ -55,7 +56,7 @@ sens = read_csv("sensibilidad.csv")
 labels = ["k=5", "k=15", "k=25", "k=50", "k=25\nsin 2-opt"]
 ln = [float(r["length"]) for r in sens[:5]]
 tm = [float(r["time_ms"]) / 1000.0 for r in sens[:5]]
-fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+fig, ax = plt.subplots(1, 2, figsize=(16, 6))
 ax[0].bar(labels, tm); ax[0].set_title("Tiempo vs k (n=2000)"); ax[0].set_ylabel("segundos")
 ax[1].bar(labels, ln); ax[1].set_title("Longitud vs k (n=2000)"); ax[1].set_ylabel("longitud tour")
 plt.tight_layout(); plt.savefig(os.path.join(IMG, "candidatos.png")); print("img/candidatos.png")

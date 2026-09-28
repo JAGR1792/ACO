@@ -282,6 +282,19 @@ probabilidades sumen 1. La elección es sesgada pero estocástica: se elige por
 ruleta, así que la opción más probable no siempre gana y se conserva
 diversidad (esto responde por qué no usar selección determinista).
 
+Para ver qué multiplica la regla, la Figura 1 la desarma con el ejemplo de la
+clase: desde la ciudad actual hay 3 candidatas ($\alpha = 1$, $\beta = 2$).
+Primero se calcula el peso de cada una ($\tau^\alpha \cdot \eta^\beta$);
+después cada peso se divide entre la suma de los tres (normalización) para
+obtener probabilidades que suman 1; por último la ruleta elige con esos
+tamaños: con $r = 0,71$ gana B aunque A era más probable.
+
+\begin{center}
+\includegraphics[width=\linewidth]{../img/ruleta.png}
+
+Figura 1: La regla de transición en 3 pasos: peso, normalización y ruleta.
+\end{center}
+
 Para no evaluar las $n$ ciudades en cada paso se usa una \textbf{lista de
 candidatos}: solo se consideran las $k$ vecinas más cercanas no visitadas
 (si ya se visitaron todas, se usa el resto). Esto reduce el costo por paso de
@@ -464,12 +477,12 @@ $n$ & Modo & Hormigas $\times$ iters & Longitud & Tiempo & Memoria pico \\
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/benchmark.png}
 
-Figura 1: Tiempo, memoria pico y longitud del tour para los tres tamaños.
+Figura 2: Tiempo, memoria pico y longitud del tour para los tres tamaños.
 \end{center}
 
-\subsection{Análisis de las gráficas (Figura 1)}
+\subsection{Análisis de las gráficas (Figura 2)}
 
-La Figura 1 tiene tres diagramas de barras, uno por métrica, con una barra por
+La Figura 2 tiene tres diagramas de barras, uno por métrica, con una barra por
 tamaño (20, 2000 y 200000). Se leen así:
 
 \textbf{Gráfica 1: Tiempo (s).} Las barras crecen de 0,14 s a 1,22 s y a 6,99
@@ -494,7 +507,7 @@ algoritmo sino tamaño de la instancia: cada barra viene de puntos aleatorios
 distintos, así que no se puede decir que una configuración sea mejor que otra
 comparando estas tres barras entre sí.
 
-\subsection{Convergencia por iteración (Figura 2)}
+\subsection{Convergencia por iteración (Figura 3)}
 
 Para obtener esta información se agregó la opción \texttt{--trace-out}, que
 guarda el mejor tour global al final de cada iteración (archivos
@@ -506,7 +519,7 @@ esto es para decidir el número de iteraciones en vez de adivinarlo.
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/convergencia.png}
 
-Figura 2: Mejor longitud global por iteración, n=20 y n=2000.
+Figura 3: Mejor longitud global por iteración, n=20 y n=2000.
 \end{center}
 
 Con $n = 20$ la curva baja de 4975 a 4460 (10,4\,\% de mejora) y se estabiliza
@@ -518,7 +531,7 @@ no superó al tour greedy inicial y el trabajo lo hizo la mejora local. El
 valor de saberlo es directo: para $n = 2000$ conviene invertir en más
 hormigas o más 2-opt y no en más iteraciones.
 
-\subsection{Escalamiento en tiempo y memoria (Figura 3)}
+\subsection{Escalamiento en tiempo y memoria (Figura 4)}
 
 Para obtener esta información se corrió el mismo experimento
 ($25$ hormigas $\times$ $50$ iters, $k = 25$, semilla 42) con
@@ -532,7 +545,7 @@ memoria antes de intentarlo.
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/escalamiento.png}
 
-Figura 3: Tiempo y memoria frente a $n$ (log-log) con referencias $O(n)$ y
+Figura 4: Tiempo y memoria frente a $n$ (log-log) con referencias $O(n)$ y
 $O(n^2)$, más el punto jerárquico de 200000.
 \end{center}
 
@@ -545,7 +558,7 @@ $200$ MB teóricos de matrices). El punto \texttt{hier} ($200000$ ciudades,
 $7$ s, $75$ MB) queda muy por debajo de ambas rectas: es la prueba empírica
 de que el particionado rompe el $O(n^2)$.
 
-\subsection{Sensibilidad a la lista de candidatos (Figura 4)}
+\subsection{Sensibilidad a la lista de candidatos (Figura 5)}
 
 Para obtener esta información se varió $k \in \{5, 15, 25, 50\}$ con
 $n = 2000$ y se añadió una corrida con $k = 25$ pero sin 2-opt, más una demo
@@ -557,7 +570,7 @@ justifica con datos la lista de candidatos en vez de usarla por fe.
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/candidatos.png}
 
-Figura 4: Tiempo y longitud según $k$ (n=2000), con variante sin 2-opt.
+Figura 5: Tiempo y longitud según $k$ (n=2000), con variante sin 2-opt.
 \end{center}
 
 La longitud es idéntica (38698,88) para $k = 5, 15, 25, 50$: esto significa
