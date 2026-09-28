@@ -79,7 +79,7 @@ class ACOSolver {
 
   ACOSolver(TSPInstance& inst_, ACOParams p_) : inst(inst_), p(p_) {}
 
-  ACOResult solve() {
+  ACOResult solve(FILE* trace = nullptr) {
     int n = inst.n;
     ACOResult best;
     best.tour.resize(n);
@@ -208,6 +208,8 @@ class ACOSolver {
         if (tau[k] > tau_max) tau[k] = (float)tau_max;
         else if (tau[k] < tau_min) tau[k] = (float)tau_min;
       }
+
+      if (trace) fprintf(trace, "%d,%.2f\n", it + 1, best.length);
     }
 
     if (p.use_2opt) {

@@ -23,6 +23,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 bash scripts/run_benchmark.sh
 python3 scripts/plot.py results.csv
+# Experimentos extra: escalamiento, sensibilidad a k, convergencia
+bash scripts/run_extra.sh
+python3 scripts/plot_extra.py
 ```
 
 Sin cmake, con un solo comando:
@@ -54,13 +57,34 @@ Las longitudes corresponden a la muestra reproducible con la semilla indicada. L
 
 De 20 a 2000 ciudades (×100 en `n`) el tiempo solo sube ×9 gracias a los candidatos, y la memoria (52 MB) refleja el `O(n²)` de las dos matrices más el k-NN. El caso de 200000 se resuelve en ~7 s y 75 MB porque nunca se construye la matriz global (pediría ~149 GB por matriz); cada celda aloja matrices de ~600×600. Las longitudes no son comparables entre tamaños porque cada `n` usa una instancia distinta; para comparar variantes hay que fijar el mismo `n` y `--seed`.
 
+![Convergencia del mejor tour por iteración](img/convergencia.png)
+
+La curva de `n = 20` baja 10.4 % y se estabiliza hacia la iteración 30 (las 70 restantes sobran). La de `n = 2000` es plana: la colonia no supera al greedy y el salto final lo da el 2-opt, lo que indica invertir en hormigas/2-opt y no en más iteraciones.
+
+![Escalamiento con rectas de referencia O(n) y O(n²)](img/escalamiento.png)
+
+Con `k` fijo el tiempo sigue la recta `O(n)` y la memoria la `O(n²)`; el punto `hier` (200000) queda muy por debajo de ambas, prueba empírica de que el particionado rompe el `O(n²)`.
+
+![Sensibilidad a k en n=2000](img/candidatos.png)
+
+La longitud no cambia con `k = 5..50` (el 2-opt corrige todo), pero sin 2-opt empeora 4 %. En `n = 200`, `k = 0` tarda el doble (139.8 ms vs 68.2 ms) que `k = 10`: la lista acelera sin degradar.
+
 ## Complejidad computacional
 
 Si `t` son las iteraciones, `m` las hormigas, `n` las ciudades y `k` los candidatos, el trabajo de construcción de tours es:
 
 ```text
 full (denso): O(t·m·n·k)
+  sale de: n pasos × hasta k candidatas por paso = O(n·k) por hormiga,
+  × m hormigas = O(m·n·k) por iteración, × t iteraciones.
+  Sin candidatos (k = n) sería O(t·m·n²).
 hier:         O(n) global + ACO por celda de tamaño acotado
+  sale de: C ≈ n/c celdas × costo de celda O(tc·mc·c·k) → lineal en n;
+  ordenar C centroides cuesta O(C²), despreciable (C = 361).
 ```
 
-En modo `full` la memoria es `O(n²)`: matriz de distancias más matriz de feromona (en `float`), más el k-NN y los tours de las `m` hormigas. En modo `hier` la memoria global es `O(n)` (el vector de puntos) más matrices pequeñas por celda. El 2-opt por iteración está acotado por la ventana de vecinos cuando `n > 500`.
+En modo `full` la memoria es `O(n²)`: dos matrices `n×n` en `float`
+(`2·n²·4` bytes: 32 MB teóricos en `n = 2000`, 52 MB medidos con hilos y
+auxiliares; 200 MB teóricos en `n = 5000`, 300 MB medidos). En modo `hier` la
+memoria global es `O(n)` (el vector de puntos) más una celda `O(c²)` por hilo.
+El 2-opt por iteración está acotado por la ventana de vecinos cuando `n > 500`.

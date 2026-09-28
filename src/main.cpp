@@ -20,6 +20,7 @@ struct Args {
   std::string mode = "auto";  // auto|full|hier|nn
   int target_cluster = 600;
   std::string out;            // csv append
+  std::string trace_out;      // csv de convergencia (iter,best) solo modo full
 };
 
 Args parse(int argc, char** argv) {
@@ -39,8 +40,9 @@ Args parse(int argc, char** argv) {
     else if (s == "--mode") a.mode = need("mode");
     else if (s == "--target-cluster") a.target_cluster = std::stoi(need("target"));
     else if (s == "--out") a.out = need("out");
+    else if (s == "--trace-out") a.trace_out = need("trace-out");
     else if (s == "--help" || s == "-h") {
-      printf("Uso: ./aco --n 20 --ants 20 --iters 100 --cand 20 --seed 42 --mode auto|full|hier|nn [--no-2opt] [--target-cluster 600] [--out results.csv]\n");
+      printf("Uso: ./aco --n 20 --ants 20 --iters 100 --cand 20 --seed 42 --mode auto|full|hier|nn [--no-2opt] [--target-cluster 600] [--out results.csv] [--trace-out trace.csv]\n");
       exit(0);
     } else { fprintf(stderr, "arg desconocido: %s\n", s.c_str()); exit(2); }
   }
@@ -80,7 +82,13 @@ static FullResult run_full(TSPInstance& inst, const Args& a) {
   p.ants = a.ants; p.iters = a.iters;
   p.cand_k = a.cand_k; p.seed = a.seed; p.use_2opt = a.use_2opt;
   ACOSolver solver(inst, p);
-  ACOResult r = solver.solve();
+  FILE* tr = nullptr;
+  if (!a.trace_out.empty()) {
+    tr = fopen(a.trace_out.c_str(), "w");
+    if (tr) fprintf(tr, "iter,best\n");
+  }
+  ACOResult r = solver.solve(tr);
+  if (tr) fclose(tr);
   return {r.tour, r.length};
 }
 
