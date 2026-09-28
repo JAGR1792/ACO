@@ -6,7 +6,7 @@
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{geometry}
-\usepackage{hyperref}
+\usepackage[hidelinks]{hyperref}
 \geometry{left=3cm,right=3cm,top=3cm,bottom=3cm}
 
 \renewcommand{\contentsname}{Índice}
@@ -231,6 +231,45 @@ local. En su lugar se particiona el plano en una rejilla de celdas de
 $\approx 600$ puntos, se corre un ACO pequeño e independiente por celda y se
 concatenan los subtours ordenando las celdas por centroide.
 
+\subsection{Qué significa el modo jerárquico, paso a paso}
+
+\texttt{hier} significa que el problema grande se parte en problemas pequeños
+que sí caben en memoria, se resuelve cada uno con ACO y luego se pegan las
+soluciones. Concretamente, para $n = 200000$ y
+\texttt{--target-cluster 600}:
+
+\begin{enumerate}
+\item \textbf{Rejilla.} Se calcula $G = \lceil\sqrt{n/600}\rceil = 19$ y se
+divide el plano en una rejilla de $19 \times 19$. Esto significa que el mapa
+queda cortado en cuadros iguales, como una cuadrícula.
+\item \textbf{Celdas (clusters).} Cada ciudad cae en un cuadro según sus
+coordenadas. Los cuadros vacíos se descartan; en la ejecución quedaron
+$361$ celdas con $\approx 550$ ciudades cada una. Esto lo muestra la línea
+\texttt{[hier] n=200000 G=19 clusters=361}: $G$ es el lado de la rejilla y
+\texttt{clusters} las celdas no vacías.
+\item \textbf{ACO por celda.} Cada celda se resuelve como un TSP independiente
+con el mismo algoritmo MMAS + 2-opt, pero en pequeño: $\approx 10$ hormigas,
+$15$--$25$ iteraciones y $k = 15$ candidatos. Esto significa que cada celda
+usa matrices de $\approx 600 \times 600$ ($\approx 1,4$ MB) en vez de una
+matriz global de $200000 \times 200000$. Las celdas se resuelven en paralelo
+con OpenMP.
+\item \textbf{Orden de las celdas.} Se calcula el centroide (punto promedio) de
+cada celda y se ordenan las celdas con vecino más cercano entre centroides.
+Esto significa que el recorrido visita las celdas en un orden geográficamente
+razonable, sin saltar de un extremo del mapa al otro.
+\item \textbf{Unión.} Se concatenan los subtours en ese orden y se obtiene el
+tour global de 200000 ciudades. Esto significa que las uniones entre celdas
+son greedy (se pegan tal cual), por lo que se pierde optimalidad global a
+cambio de hacerlo computable.
+\end{enumerate}
+
+Por eso en el CSV la fila de 200000 dice \texttt{ants=20, iters=100}: son los
+valores globales del CLI, pero cada celda corre su propio ACO de
+$\approx 10$ hormigas $\times$ $15$--$25$ iteraciones. Y
+\texttt{--target-cluster 600} significa el tamaño de celda deseado: con un
+valor menor hay más celdas (más rápido, peor calidad en las uniones); con un
+valor mayor hay menos celdas (mejor calidad, más memoria y tiempo por celda).
+
 \subsection{Complejidad}
 
 \begin{itemize}
@@ -339,6 +378,33 @@ $n$ & Modo & Hormigas $\times$ iters & Longitud & Tiempo & Memoria pico \\
 
 Figura 2: Tiempo, memoria pico y longitud del tour para los tres tamaños.
 \end{center}
+
+\subsection{Análisis de las gráficas (Figura 2)}
+
+La Figura 2 tiene tres diagramas de barras, uno por métrica, con una barra por
+tamaño (20, 2000 y 200000). Se leen así:
+
+\textbf{Gráfica 1: Tiempo (s).} Las barras crecen de 0,14 s a 1,22 s y a 6,99
+s. Esto significa que multiplicar las ciudades por 100 (de 20 a 2000) solo
+multiplica el tiempo por 9: el crecimiento es subcuadrático gracias a los
+candidatos. La barra de 200000 ($\approx 7$ s) es la prueba visual de que el
+modo jerárquico rompe la barrera del $O(n^2)$: sin él, esa barra ni siquiera
+podría existir porque el programa no cabría en memoria.
+
+\textbf{Gráfica 2: Memoria pico (MB).} Las barras marcan 4,4 MB, 52 MB y 75
+MB. Esto significa dos cosas: entre 20 y 2000 la memoria sí sigue al $O(n^2)$
+de las matrices (las barras crecen fuerte), pero entre 2000 y 200000 apenas
+sube de 52 a 75 MB a pesar de haber $\times 100$ ciudades. Esa segunda
+transición plana es la huella del diseño jerárquico: la memoria deja de
+depender de $n^2$ y pasa a depender de $n$ (el vector de puntos) más celdas de
+tamaño fijo.
+
+\textbf{Gráfica 3: Longitud del tour.} Las barras crecen (4460, 38699,
+408901) simplemente porque hay más ciudades que visitar en el mismo mapa de
+$1000 \times 1000$. Esto significa que esta gráfica no mide calidad del
+algoritmo sino tamaño de la instancia: cada barra viene de puntos aleatorios
+distintos, así que no se puede decir que una configuración sea mejor que otra
+comparando estas tres barras entre sí.
 
 \subsection{Análisis de resultados}
 
