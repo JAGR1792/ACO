@@ -253,7 +253,7 @@ Las hormigas de cada iteración se construyen en paralelo con OpenMP.
 \item \texttt{src/metrics.h}: cronómetro (\texttt{chrono}) y pico de RAM (\texttt{getrusage}).
 \item \texttt{CMakeLists.txt}: compilación \texttt{Release -O3} con OpenMP.
 \item \texttt{scripts/run\_benchmark.sh}: corre los 3 casos y genera \texttt{results.csv}.
-\item \texttt{scripts/plot.py}: genera \texttt{benchmark.png}.
+\item \texttt{scripts/plot.py}: genera \texttt{img/benchmark.png}.
 \end{itemize}
 
 \subsection{Compilación}
@@ -335,7 +335,7 @@ $n$ & Modo & Hormigas $\times$ iters & Longitud & Tiempo & Memoria pico \\
 \end{center}
 
 \begin{center}
-\includegraphics[width=0.95\linewidth]{../benchmark.png}
+\includegraphics[width=0.95\linewidth]{../img/benchmark.png}
 
 Figura 2: Tiempo, memoria pico y longitud del tour para los tres tamaños.
 \end{center}

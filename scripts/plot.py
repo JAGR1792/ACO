@@ -25,6 +25,6 @@ ax[2].bar([str(n) + "\n" + m for n, m in zip(ns, modes)], lens)
 ax[2].set_title("Longitud tour")
 
 plt.tight_layout()
-out = os.path.join(os.path.dirname(__file__), "..", "benchmark.png")
+out = os.path.join(os.path.dirname(__file__), "..", "img", "benchmark.png")
 plt.savefig(out)
 print("guardado:", out)
