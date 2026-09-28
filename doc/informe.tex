@@ -1,0 +1,394 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\geometry{left=3cm,right=3cm,top=3cm,bottom=3cm}
+
+\renewcommand{\contentsname}{Índice}
+\renewcommand{\tablename}{Cuadro}
+\renewcommand{\figurename}{Figura}
+
+\begin{document}
+
+% ---------------- Portada ----------------
+\begin{center}
+{\large Universidad Sergio Arboleda}
+
+\vspace{1cm}
+{\large Inteligencia Artificial}
+
+\vspace{3cm}
+{\LARGE\bfseries Optimización por Colonia de Hormigas}
+
+\vspace{0.4cm}
+{\Large Taller de optimización combinatoria: el Agente Viajero}
+
+\vspace{4cm}
+{\bfseries Integrantes:}
+
+Lina Castañeda
+
+Jorge García
+
+Brayan Hernandez
+
+\vspace{2cm}
+{\bfseries Docente:}
+
+Joaquin Sánchez
+
+\vspace{4cm}
+Bogotá D.C.
+
+2026
+\end{center}
+\newpage
+
+% ---------------- Índice ----------------
+\tableofcontents
+\newpage
+
+% ---------------- 1 ----------------
+\section{Introducción}
+
+La optimización por colonia de hormigas (\textit{Ant Colony Optimization}, ACO)
+es una metaheurística inspirada en el comportamiento de las hormigas reales para
+encontrar caminos cortos entre su nido y las fuentes de alimento. Las hormigas
+artificiales construyen soluciones de forma probabilística guiadas por rastros de
+feromona y por información heurística del problema.
+
+En este taller se diseñó e implementó un algoritmo ACO para resolver el problema
+del Agente Viajero (\textit{Travelling Salesman Problem}, TSP). El objetivo no es
+solamente encontrar tours cortos, sino medir el desempeño del algoritmo en
+\textbf{tiempo} y en \textbf{memoria} para tres tamaños de instancia:
+20, 2000 y 200000 ciudades, ejecutando todo en local.
+
+La implementación se realizó en C++17 con paralelismo OpenMP y se publicó en el
+repositorio \texttt{github.com/JAGR1792/ACO}.
+
+% ---------------- 2 ----------------
+\section{Descripción del problema}
+
+Se dispone de un conjunto de $n$ ciudades con coordenadas en el plano. Se debe
+encontrar el recorrido cerrado más corto que visite cada ciudad exactamente una
+vez y regrese a la ciudad de origen.
+
+Las instancias son euclidianas con puntos uniformes aleatorios en
+$[0,1000]^2$, generadas con semilla fija (\texttt{--seed 42}) para que sean
+reproducibles. Se evaluaron tres tamaños:
+
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+Instancia & Ciudades & Semilla \\
+\midrule
+Pequeña & 20 & 42 \\
+Mediana & 2000 & 42 \\
+Grande & 200000 & 42 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ---------------- 3 ----------------
+\section{Punto 1. Formulación del problema}
+
+\subsection{Variable de decisión}
+
+Una solución se representa como una permutación
+$\pi = (\pi_1, \pi_2, \dots, \pi_n)$ de las $n$ ciudades, que indica el orden de
+visita. El tour es cerrado: después de $\pi_n$ se regresa a $\pi_1$.
+
+\subsection{Función objetivo}
+
+Se minimiza la distancia total del recorrido:
+
+\begin{equation}
+\min L(\pi) = \sum_{i=1}^{n-1} d(\pi_i, \pi_{i+1}) + d(\pi_n, \pi_1)
+\end{equation}
+
+donde $d(a,b)$ es la distancia euclidiana entre las ciudades $a$ y $b$.
+
+\subsection{Número de soluciones diferentes}
+
+Fijando la ciudad inicial y sin distinguir el sentido del recorrido, el número de
+tours diferentes es:
+
+\begin{equation}
+\frac{(n-1)!}{2}
+\end{equation}
+
+Cuadro 1: Tamaño del espacio de búsqueda.
+\begin{center}
+\begin{tabular}{cc}
+\toprule
+$n$ & Tours diferentes \\
+\midrule
+20 & $\approx 6{,}1 \times 10^{16}$ \\
+2000 & del orden de $10^{5735}$ \\
+200000 & intratable por enumeración \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Por lo tanto, la enumeración exhaustiva solo es concebible para valores muy
+pequeños de $n$, lo que justifica el uso de una metaheurística como ACO.
+
+\subsection{Cálculo manual con un ejemplo pequeño}
+
+Con 4 ciudades $A(0,0)$, $B(3,0)$, $C(3,4)$, $D(0,4)$ existen $(4-1)!/2 = 3$
+tours diferentes (fijando $A$ como inicio):
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Tour & Longitud \\
+\midrule
+$A$-$B$-$C$-$D$-$A$ & $3 + 4 + 3 + 4 = 14$ \\
+$A$-$B$-$D$-$C$-$A$ & $3 + 5 + 3 + 5 = 16$ \\
+$A$-$C$-$B$-$D$-$A$ & $5 + 4 + 5 + 4 = 18$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+El óptimo es el tour $A$-$B$-$C$-$D$-$A$ con longitud 14. Este ejemplo muestra
+que la función objetivo es simplemente la suma de las aristas del recorrido
+cerrado.
+
+% ---------------- 4 ----------------
+\section{Punto 2. Diseño del algoritmo ACO}
+
+\subsection{Variante y parámetros}
+
+Se implementó la variante \textbf{MMAS} (\textit{Max-Min Ant System})
+simplificada con mejora local 2-opt. Sus parámetros fueron:
+
+Cuadro 2: Configuración del algoritmo ACO.
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Parámetro & Símbolo & Valor \\
+\midrule
+Hormigas por iteración & $m$ & 20 (n=20), 25 (n=2000) \\
+Iteraciones & $t_{\max}$ & 100 (n=20), 50 (n=2000) \\
+Peso de feromona & $\alpha$ & 1,0 \\
+Peso heurístico & $\beta$ & 2,5 \\
+Evaporación & $\rho$ & 0,1 \\
+Candidatos k-NN & $k$ & 8 (n=20), 25 (n=2000) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Construcción de soluciones}
+
+Cada hormiga construye un tour paso a paso. Estando en la ciudad $i$, la
+probabilidad de moverse a la ciudad no visitada $j$ es proporcional a
+$\tau_{ij}^{\alpha} \cdot \eta_{ij}^{\beta}$, donde $\tau_{ij}$ es la
+feromona y $\eta_{ij} = 1/d_{ij}$ la información heurística.
+
+Para no evaluar las $n$ ciudades en cada paso se usa una \textbf{lista de
+candidatos}: solo se consideran las $k$ vecinas más cercanas no visitadas
+(si ya se visitaron todas, se usa el resto). Esto reduce el costo por paso de
+$O(n)$ a $O(k)$.
+
+\subsection{Actualización de feromona}
+
+En cada iteración se evapora toda la feromona con factor $(1-\rho)$ y solo la
+\textbf{mejor hormiga global} deposita feromona ($1/L_{\text{mejor}}$) en las
+aristas de su tour, con límites $[\tau_{\min}, \tau_{\max}]$ para evitar la
+convergencia prematura.
+
+\subsection{Mejora local 2-opt}
+
+Al mejor tour de cada iteración (y al mejor final) se le aplica 2-opt
+\textit{first-improvement}: se prueba a reconectar pares de aristas y se acepta
+el primer intercambio que acorte el tour (ventana de 40 vecinos si $n > 500$).
+
+\subsection{Modos de ejecución}
+
+Cuadro 3: Modos del programa.
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Modo & Uso & Descripción \\
+\midrule
+\texttt{full} & $n \le 5000$ & ACO denso: matriz $n \times n$ + k-NN + MMAS + 2-opt \\
+\texttt{hier} & $n$ grande & Jerárquico: rejilla $\to$ ACO por celda $\to$ unión por centroides \\
+\texttt{nn} & referencia & Vecino más cercano greedy (+ 2-opt si $n \le 5000$) \\
+\texttt{auto} & defecto & \texttt{full} si $n \le 5000$, \texttt{hier} en otro caso \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+El modo \texttt{hier} es necesario para 200000 ciudades: una matriz densa de
+$200000^2$ valores en \texttt{float} ocuparía $\approx 149$ GB \textbf{por
+matriz} (el programa lo reporta como \texttt{matrix\_mb\_est}), imposible en
+local. En su lugar se particiona el plano en una rejilla de celdas de
+$\approx 600$ puntos, se corre un ACO pequeño e independiente por celda y se
+concatenan los subtours ordenando las celdas por centroide.
+
+\subsection{Complejidad}
+
+\begin{itemize}
+\item Memoria en modo \texttt{full}: $O(n^2)$ (matriz de distancias + matriz de feromona).
+\item Tiempo en modo \texttt{full}: $O(t_{\max} \cdot m \cdot n \cdot k)$ con candidatos.
+\item Modo \texttt{hier}: $O(n)$ en memoria global + ACO sobre celdas de tamaño acotado.
+\end{itemize}
+
+Las hormigas de cada iteración se construyen en paralelo con OpenMP.
+
+% ---------------- 5 ----------------
+\section{Punto 3. Implementación y comandos de ejecución}
+
+\subsection{Estructura del repositorio}
+
+\begin{itemize}
+\item \texttt{src/tsp.h}: instancia euclidiana, matriz densa, k-NN exacto.
+\item \texttt{src/aco.h}: solver MMAS + 2-opt.
+\item \texttt{src/main.cpp}: CLI, modos, particionado en rejilla, salida CSV.
+\item \texttt{src/metrics.h}: cronómetro (\texttt{chrono}) y pico de RAM (\texttt{getrusage}).
+\item \texttt{CMakeLists.txt}: compilación \texttt{Release -O3} con OpenMP.
+\item \texttt{scripts/run\_benchmark.sh}: corre los 3 casos y genera \texttt{results.csv}.
+\item \texttt{scripts/plot.py}: genera \texttt{benchmark.png}.
+\end{itemize}
+
+\subsection{Compilación}
+
+Vía CMake (recomendada):
+\begin{verbatim}
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+\end{verbatim}
+
+Vía manual, sin cmake (un solo comando):
+\begin{verbatim}
+g++ -O3 -std=c++17 -fopenmp src/main.cpp -o aco
+\end{verbatim}
+
+\subsection{Comandos de ejecución}
+
+\begin{verbatim}
+# 20 ciudades: ACO completo
+./build/aco --n 20 --ants 20 --iters 100 --cand 8 \
+  --seed 42 --mode full
+
+# 2000 ciudades: ACO completo con 25 candidatos
+./build/aco --n 2000 --ants 25 --iters 50 --cand 25 \
+  --seed 42 --mode full --out results.csv
+
+# 200000 ciudades: ACO jerárquico (celdas de ~600 puntos)
+./build/aco --n 200000 --seed 42 --mode hier \
+  --target-cluster 600 --out results.csv
+
+# Benchmark completo + gráfica
+bash scripts/run_benchmark.sh
+python3 scripts/plot.py results.csv
+\end{verbatim}
+
+Parámetros: \texttt{--n} ciudades, \texttt{--ants} hormigas por iteración,
+\texttt{--iters} iteraciones, \texttt{--cand} vecinos candidatos
+(\texttt{0} = sin lista), \texttt{--seed} semilla, \texttt{--target-cluster}
+tamaño de celda en modo \texttt{hier}, \texttt{--out} archivo CSV,
+\texttt{--no-2opt} desactiva la mejora local.
+
+\subsection{Evidencia de ejecución}
+
+Figura 1: Salidas reales del programa en local.
+\begin{verbatim}
+n=20 mode=full ants=20 iters=100 seed=42 length=4460.31
+  time_ms=142.6 peak_kb=4452
+  matrix_mb_est=0.00 (solo modo full)
+
+n=2000 mode=full ants=25 iters=50 seed=42 length=38698.88
+  time_ms=1218.2 peak_kb=52028
+  matrix_mb_est=15.26 (solo modo full)
+
+[hier] n=200000 G=19 clusters=361
+n=200000 mode=hier ants=20 iters=100 seed=42 length=408901.41
+  time_ms=6988.3 peak_kb=74796
+  matrix_mb_est=152587.89 (solo modo full)
+\end{verbatim}
+
+% ---------------- 6 ----------------
+\section{Punto 4. Evaluación experimental}
+
+\subsection{Resultados}
+
+Máquina: Arch Linux, 12 núcleos, 14 GB RAM, \texttt{g++ 16.2.1}, OpenMP.
+Semilla 42 en los tres casos.
+
+Cuadro 4: Desempeño en tiempo y memoria.
+\begin{center}
+\begin{tabular}{cccccc}
+\toprule
+$n$ & Modo & Hormigas $\times$ iters & Longitud & Tiempo & Memoria pico \\
+\midrule
+20 & full (k=8) & $20 \times 100$ & 4460,31 & 0,14 s & 4,4 MB \\
+2000 & full (k=25) & $25 \times 50$ & 38698,88 & 1,22 s & 52,0 MB \\
+200000 & hier (361 celdas) & $10 \times 25$ por celda & 408901,41 & 6,99 s & 75,0 MB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.95\linewidth]{../benchmark.png}
+
+Figura 2: Tiempo, memoria pico y longitud del tour para los tres tamaños.
+\end{center}
+
+\subsection{Análisis de resultados}
+
+\textbf{a) ¿Cómo escala el tiempo?}
+De 20 a 2000 ciudades ($\times 100$ en $n$) el tiempo solo sube de 0,14 s a
+1,22 s ($\times 9$), gracias a la lista de candidatos: cada paso cuesta $O(k)$
+en vez de $O(n)$. El caso de 200000 se resuelve en $\approx 7$ s porque el
+trabajo se divide en 361 ACOs de $\approx 550$ puntos (costo casi lineal en
+$n$) más el ordenado de centroides $O(C^2)$ con $C = 361$, despreciable. Sin el
+enfoque jerárquico, un ACO denso en 200000 ciudades sería intratable en tiempo
+($O(t_{\max} \cdot m \cdot n^2)$ por iteración).
+
+\textbf{b) ¿Cómo escala la memoria?}
+Con $n = 20$ se usan 4,4 MB (sobrecarga base del proceso y los hilos OpenMP;
+las matrices de $20 \times 20$ son insignificantes). Con $n = 2000$ se usan
+52 MB: $\approx 15$ MB de distancias + $\approx 15$ MB de feromona + k-NN y
+tours de 25 hormigas, coherente con el $O(n^2)$ teórico. Con $n = 200000$ se
+usan solo 75 MB: nunca se construye la matriz global (que pediría $\approx 149$
+GB por matriz); cada celda aloja matrices de $\approx 600 \times 600$
+($\approx 1,4$ MB) y el resto es el vector de 200000 puntos. El diseño
+jerárquico cambia la memoria de $O(n^2)$ a $O(n)$.
+
+\textbf{c) ¿Qué aportan los candidatos y el 2-opt?}
+Son los que más mejoran la relación calidad/tiempo: los candidatos reducen el
+paso de $O(n)$ a $O(k)$ y el 2-opt corrige cruces del tour construido por las
+hormigas. Desactivarlos (\texttt{--cand 0}, \texttt{--no-2opt}) empeora la
+longitud, el tiempo o ambos.
+
+\textbf{d) ¿Son comparables las longitudes entre tamaños?}
+No directamente: cada $n$ usa una instancia aleatoria distinta (más ciudades
+$\Rightarrow$ tour más largo). Para comparar variantes (distinto $k$, $\rho$ o
+con/sin 2-opt) hay que fijar el mismo $n$ y \texttt{--seed} y mirar la columna
+\texttt{length} del CSV.
+
+\textbf{e) ¿Qué configuración se recomienda?}
+Para miles de ciudades, ACO denso con $k \approx 25$ y 2-opt activado (caso
+$n = 2000$: 1,2 s y 52 MB). Para cientos de miles, el esquema jerárquico con
+celdas de $\approx 600$ puntos ($\approx 7$ s y 75 MB), aceptando que la unión
+greedy de subtours sacrifica optimalidad global. Trabajo futuro: orientar y
+coser subtours vecinos en vez de concatenar, y 2-opt entre celdas.
+
+\subsection{Conclusión de la evaluación experimental}
+
+\begin{enumerate}
+\item El ACO clásico con matriz densa es viable hasta algunos miles de ciudades
+en local (2000 $\Rightarrow$ 1,2 s, 52 MB).
+\item Para 200000 ciudades el ACO puro es inviable por memoria ($\approx 149$
+GB por matriz); el esquema jerárquico lo hace posible en $\approx 7$ s y 75 MB.
+\item Con la misma semilla, la longitud del tour es reproducible en cualquier
+máquina; tiempo y memoria solo son comparables dentro de la misma máquina.
+\end{enumerate}
+
+\end{document}
