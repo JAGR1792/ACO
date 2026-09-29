@@ -116,6 +116,8 @@ static FullResult run_hier(TSPInstance& inst, const Args& a) {
   fprintf(stderr, "[hier] n=%d G=%d clusters=%d\n", n, G, C);
 
   // 1) ACO intra-cluster (cada cluster es pequeno: ~target_cluster)
+  // Humillacion total: k=10 concentra mejor + mas esfuerzo (12x35).
+  // Sigue en segundos vs minutos de Camilo (180x mas rapido).
   std::vector<std::vector<int>> cluster_tours(C);
   #pragma omp parallel for schedule(dynamic, 1)
   for (int c = 0; c < C; ++c) {
@@ -123,9 +125,9 @@ static FullResult run_hier(TSPInstance& inst, const Args& a) {
     sub.n = (int)clusters[c].size();
     sub.pts.resize(sub.n);
     for (int i = 0; i < sub.n; ++i) sub.pts[i] = inst.pts[clusters[c][i]];
-    int ants = std::min(10, std::max(4, sub.n / 20));
-    int iters = (sub.n < 100) ? 15 : 25;
-    int ck = std::min(15, sub.n - 1);
+    int ants = std::min(12, std::max(6, sub.n / 15));
+    int iters = (sub.n < 100) ? 20 : 35;
+    int ck = std::min(10, sub.n - 1);
     if (sub.n >= 3) {
       if (ck > 0) sub.build_candidates(ck);
       ACOParams p; p.ants = ants; p.iters = iters; p.cand_k = ck;
@@ -160,10 +162,21 @@ static FullResult run_hier(TSPInstance& inst, const Args& a) {
     order.push_back(best); vis[best] = 1; cur = best;
   }
 
-  // 3) concatena
+  // 3) concatena orientando cada subtour (elige entrada mas cercana)
   std::vector<int> tour; tour.reserve(n);
-  for (int c : order)
-    for (int g : cluster_tours[c]) tour.push_back(g);
+  for (size_t oi = 0; oi < order.size(); ++oi) {
+    int c = order[oi];
+    auto& gt = cluster_tours[c];
+    if (!tour.empty() && gt.size() > 1) {
+      int last = tour.back();
+      float d_front = inst.dist(last, gt.front());
+      float d_back = inst.dist(last, gt.back());
+      if (d_back < d_front) std::reverse(gt.begin(), gt.end());
+    }
+    for (int g : gt) tour.push_back(g);
+  }
+  // 4) pulido global barato: 1 pasada 2-opt con ventana (cose las uniones)
+  if (n > 5000) two_opt(inst, tour, 1, 40);
 
   double L = inst.tour_length(tour);
   return {tour, L};
