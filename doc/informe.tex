@@ -582,6 +582,45 @@ ms con $k = 10$ ($\times 2$ más lento) con igual calidad: esto significa que
 la lista de candidatos acelera sin degradar, y el factor crecería con $n$
 porque el paso pasa de $O(n)$ a $O(k)$.
 
+\subsection{Por qué 25 hormigas y 50 iteraciones (Cuadro 5)}
+
+Para fijar $m$ y $t$ se barrió cada uno dejando el otro fijo ($n = 2000$,
+$k = 25$, semilla 42). Sacamos esta información porque son los dos
+parámetros que multiplican directamente el costo $O(t \cdot m \cdot n \cdot
+k)$: cada hormiga o iteración de más se paga en tiempo lineal, así que hay
+que probar que aportan calidad.
+
+Cuadro 5: Sensibilidad a hormigas (con $t = 50$) e iteraciones (con $m = 25$).
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Configuración & Longitud & Tiempo & Memoria \\
+\midrule
+$m = 10$ & 38698,88 & 0,63 s & 51,7 MB \\
+$m = 25$ & 38698,88 & 0,78 s & 51,6 MB \\
+$m = 50$ & 38698,88 & 1,12 s & 52,0 MB \\
+\midrule
+$t = 10$ & 38698,88 & 0,32 s & 51,8 MB \\
+$t = 30$ & 38698,88 & 0,86 s & 51,9 MB \\
+$t = 50$ & 38698,88 & 1,48 s & 51,8 MB \\
+$t = 100$ & 38585,53 & 2,99 s & 51,9 MB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+De 10 a 50 hormigas la calidad no se mueve: esto significa que, con MMAS
+(donde solo la mejor deposita), las hormigas extra muestrean lo mismo más
+caro. Se eligió $m = 25$ y no 10 como margen de seguridad (cuesta solo
++24\,\% de tiempo) para instancias o semillas donde la colonia sí aporte; 50
+es desperdicio puro (+78\,\% por +0\,\%).
+
+De 10 a 50 iteraciones tampoco hay ganancia (manda el greedy + 2-opt); con
+$t = 100$ aparece una mejora marginal de +0,3\,\% al doble de costo. Se eligió
+$t = 50$ como punto medio: da espacio al aprendizaje de feromona (en $n = 20$
+la colonia sí mejoró hasta la iteración $\approx 30$) sin pagar el doble por
+décimas. La memoria, como predice el análisis, no depende ni de $m$ ni de $t$
+($\approx 52$ MB en todas las filas: las matrices son las mismas).
+
 \subsection{Análisis de resultados}
 
 \textbf{a) ¿Cómo escala el tiempo?}
