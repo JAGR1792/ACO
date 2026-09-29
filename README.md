@@ -6,9 +6,9 @@ Optimización por colonia de hormigas para el TSP euclidiano en C++17 con OpenMP
 
 - **MMAS simplificado:** cada hormiga construye un tour con probabilidad proporcional a `tau^alpha * eta^beta` (`tau` feromona, `eta = 1/distancia`). Solo la mejor hormiga global deposita feromona, con límites `[tau_min, tau_max]`.
 - **Parámetros:** `alpha = 1.0`, `beta = 2.5`, evaporación `rho = 0.1`. Las hormigas de cada iteración se construyen en paralelo con OpenMP.
-- **Lista de candidatos k-NN:** cada paso solo considera las `k` vecinas más cercanas no visitadas. Reduce el costo por paso de `O(n)` a `O(k)`.
+- **Lista de candidatos k-NN:** cada paso solo considera las `k` vecinas más cercanas no visitadas. Reduce el costo por paso de `O(n)` a `O(k)`. Sin matriz `n×n`: distancias al vuelo + feromona dispersa `n×k`.
 - **2-opt:** mejora local *first-improvement* al mejor tour de cada iteración y al final (ventana de 40 vecinos si `n > 500`).
-- **Modos:** `full` (ACO denso, `n <= 5000`), `hier` (jerárquico para `n` grande: rejilla → ACO por celda de ~600 puntos → unión por centroides), `nn` (vecino más cercano, referencia). `auto` elige solo.
+- **Modos:** `full` (ACO disperso `O(n·k)`, `n <= 5000`), `hier` (jerárquico para `n` grande: rejilla → ACO por celda de ~600 puntos → unión por centroides), `nn` (vecino más cercano, referencia). `auto` elige solo.
 
 ## Método experimental
 
@@ -47,15 +47,15 @@ Otros comandos útiles:
 
 | n | Modo | Longitud | Tiempo | Memoria pico |
 |---|--:|---:|---:|---:|
-| 20 | full (k=8) | 4460.31 | 0.14 s | 4.4 MB |
-| 2000 | full (k=25) | 38698.88 | 1.22 s | 52.0 MB |
-| 200000 | hier (361 celdas) | 408901.41 | 6.99 s | 75.0 MB |
+| 20 | full (k=8) | 4460.31 | 0.05 s | 4.6 MB |
+| 2000 | full (k=25) | 38762.69 | 0.38 s | 5.7 MB |
+| 200000 | hier (361 celdas) | 412373.13 | 2.69 s | 11.7 MB |
 
-Las longitudes corresponden a la muestra reproducible con la semilla indicada. Los tiempos y memorias son de una ejecución de ejemplo (Arch Linux, 12 núcleos, 14 GB RAM, `g++ 16.2.1`) y cambian según el equipo.
+Las longitudes corresponden a la muestra reproducible con la semilla indicada. Los tiempos y memorias son de una ejecución de ejemplo (Arch Linux, 12 núcleos, 14 GB RAM, `g++ 16.2.1`) y cambian según el equipo. Tras el híbrido disperso (`n×k`, sin matriz densa) la memoria baja ~9× en `n=2000` y ~6× en `n=200k`, y el tiempo ~3× (eta precalculada, sin `pow()` por paso, fallback sin alloc).
 
 ![Tiempo, memoria pico y longitud del tour para los tres tamaños](img/benchmark.png)
 
-De 20 a 2000 ciudades (×100 en `n`) el tiempo solo sube ×9 gracias a los candidatos, y la memoria (52 MB) refleja el `O(n²)` de las dos matrices más el k-NN. El caso de 200000 se resuelve en ~7 s y 75 MB porque nunca se construye la matriz global (pediría ~149 GB por matriz); cada celda aloja matrices de ~600×600. Las longitudes no son comparables entre tamaños porque cada `n` usa una instancia distinta; para comparar variantes hay que fijar el mismo `n` y `--seed`.
+De 20 a 2000 ciudades (×100 en `n`) el tiempo solo sube ×8 gracias a los candidatos, y la memoria (5.7 MB) refleja el `O(n·k)` disperso: `idx+dist+tau+eta` (~0.76 MB teóricos en `n=2000,k=25` + puntos y overhead de hilos). El caso de 200000 se resuelve en ~2.7 s y ~11.7 MB porque nunca se construye la matriz global (pediría ~152 GB por matriz densa); cada celda aloja estructuras de ~600×15. Las longitudes no son comparables entre tamaños porque cada `n` usa una instancia distinta; para comparar variantes hay que fijar el mismo `n` y `--seed`.
 
 ![Convergencia del mejor tour por iteración](img/convergencia.png)
 
@@ -63,7 +63,7 @@ La curva de `n = 20` baja 10.4 % y se estabiliza hacia la iteración 30 (las 70 
 
 ![Escalamiento con rectas de referencia O(n) y O(n²)](img/escalamiento.png)
 
-Con `k` fijo el tiempo sigue la recta `O(n)` y la memoria la `O(n²)`; el punto `hier` (200000) queda muy por debajo de ambas, prueba empírica de que el particionado rompe el `O(n²)`.
+Con `k` fijo el tiempo sigue la recta `O(n)` y la memoria la `O(n·k)`; el punto `hier` (200000) queda muy por debajo de ambas, prueba empírica de que el particionado + dispersión rompen el `O(n²)`.
 
 ![Sensibilidad a k en n=2000](img/candidatos.png)
 
@@ -74,7 +74,7 @@ La longitud no cambia con `k = 5..50` (el 2-opt corrige todo), pero sin 2-opt em
 Si `t` son las iteraciones, `m` las hormigas, `n` las ciudades y `k` los candidatos, el trabajo de construcción de tours es:
 
 ```text
-full (denso): O(t·m·n·k)
+full (disperso): O(t·m·n·k)
   sale de: n pasos × hasta k candidatas por paso = O(n·k) por hormiga,
   × m hormigas = O(m·n·k) por iteración, × t iteraciones.
   Sin candidatos (k = n) sería O(t·m·n²).
@@ -83,8 +83,8 @@ hier:         O(n) global + ACO por celda de tamaño acotado
   ordenar C centroides cuesta O(C²), despreciable (C = 361).
 ```
 
-En modo `full` la memoria es `O(n²)`: dos matrices `n×n` en `float`
-(`2·n²·4` bytes: 32 MB teóricos en `n = 2000`, 52 MB medidos con hilos y
-auxiliares; 200 MB teóricos en `n = 5000`, 300 MB medidos). En modo `hier` la
-memoria global es `O(n)` (el vector de puntos) más una celda `O(c²)` por hilo.
-El 2-opt por iteración está acotado por la ventana de vecinos cuando `n > 500`.
+En modo `full` la memoria es `O(n·k)`: `idx(int)+dist(float)+tau(float)+eta(float)`
+(`4·n·k·4` bytes: 0.76 MB teóricos en `n = 2000,k = 25`, 5.7 MB medidos con hilos y
+auxiliares; densa teórica `n²·4` sería 15.3 MB en `n = 2000`, 152 GB en `n = 200000`).
+En modo `hier` la memoria global es `O(n)` (el vector de puntos en `float`) más una
+celda `O(c·k)` por hilo. El 2-opt por iteración está acotado por la ventana de vecinos cuando `n > 500`.

@@ -4,6 +4,7 @@
 #include <vector>
 #include <limits>
 #include <cmath>
+#include <cstdio>
 #include <omp.h>
 
 struct ACOParams {
@@ -12,7 +13,7 @@ struct ACOParams {
   double alpha = 1.0;
   double beta = 2.5;
   double rho = 0.1;        // evaporacion
-  int cand_k = 20;         // 0 = sin lista de candidatos
+  int cand_k = 20;         // 0 = sin lista de candidatos (solo heuristica)
   uint32_t seed = 42;
   bool use_2opt = true;
   int q0_decimals = -1;    // reservado
@@ -35,7 +36,6 @@ inline bool two_opt(TSPInstance& inst, std::vector<int>& tour, int max_passes = 
     for (int i = 0; i < n - 2; ++i) {
       int a = tour[i], b = tour[(i + 1) % n];
       int jmax = (window > 0) ? std::min(n, i + 2 + window) : n;
-      // j recorre aristas no adyacentes; truco con posiciones para reversa O(1) amortizado
       for (int j = i + 2; j < jmax; ++j) {
         int jj = j % n;
         if (i == 0 && jj == n - 1) continue;
@@ -43,17 +43,7 @@ inline bool two_opt(TSPInstance& inst, std::vector<int>& tour, int max_passes = 
         double before = inst.dist(a, b) + inst.dist(c, d);
         double after = inst.dist(a, c) + inst.dist(b, d);
         if (after + 1e-9 < before) {
-          // reversar segmento (i+1 .. jj)
-          int lo = i + 1, hi = jj;
-          if (lo < hi) {
-            // maneja wrap cuando jj < i (no ocurre aqui porque j>i lineal, pero con modulo si)
-            // como jmax<=n e i<n, el segmento es lineal salvo cruce del 0; lo tratamos lineal
-            // Reconstruccion simple por indice lineal sobre tour duplicado:
-          }
-          // Implementacion robusta: reversa circular entre i+1 y jj
-          // Convertimos a bucle con posiciones circulares.
           int l = (i + 1) % n, r = jj;
-          // numero de swaps = dist circular(l,r)/2
           int len = (r - l + n) % n + 1;
           for (int s = 0; s < len / 2; ++s) {
             std::swap(tour[l], tour[r]);
@@ -71,7 +61,8 @@ inline bool two_opt(TSPInstance& inst, std::vector<int>& tour, int max_passes = 
   return any;
 }
 
-// MMAS simplificado: solo la mejor hormiga global deposita, con limites tau.
+// MMAS simplificado disperso: feromona n*k (no n*n), eta precalculada.
+// Memoria O(n*k). Tiempo O(t*m*n*k) paralelo en hormigas.
 class ACOSolver {
  public:
   TSPInstance& inst;
@@ -81,13 +72,10 @@ class ACOSolver {
 
   ACOResult solve(FILE* trace = nullptr) {
     int n = inst.n;
+    int K = inst.cand_k; // 0 => sin candidatos
     ACOResult best;
     best.tour.resize(n);
     std::iota(best.tour.begin(), best.tour.end(), 0);
-
-    // Feromona densa: solo viable si n moderado. El llamante decide.
-    std::vector<float> tau((size_t)n * n, 1.0f);
-    auto TAU = [&](int i, int j) -> float& { return tau[(size_t)i * n + j]; };
 
     // Inicializa best con NN greedy desde 0 para tener cota.
     {
@@ -96,11 +84,12 @@ class ACOSolver {
       int cur = 0; t.push_back(cur); vis[cur] = 1;
       for (int s = 1; s < n; ++s) {
         int nxt = -1; float bd = std::numeric_limits<float>::max();
-        // si hay candidatos, buscar ahi primero
-        if (!inst.cand.empty()) {
-          for (int c : inst.cand[cur]) if (!vis[c]) {
-            float d = inst.dist(cur, c);
-            if (d < bd) { bd = d; nxt = c; }
+        if (inst.has_candidates()) {
+          const int* row = &inst.knn_idx[(size_t)cur * K];
+          const float* rd = &inst.knn_dist[(size_t)cur * K];
+          for (int tt = 0; tt < K; ++tt) {
+            int c = row[tt];
+            if (!vis[c] && rd[tt] < bd) { bd = rd[tt]; nxt = c; }
           }
         }
         if (nxt < 0) {
@@ -117,7 +106,20 @@ class ACOSolver {
 
     double tau_max = 1.0 / (p.rho * best.length + 1e-300);
     double tau_min = tau_max / (2.0 * n);
-    std::fill(tau.begin(), tau.end(), (float)tau_max);
+
+    // Feromona dispersa + heuristica precalculada (solo si hay candidatos).
+    std::vector<float> tau, eta;
+    if (K > 0) {
+      tau.assign((size_t)n * K, (float)tau_max);
+      eta.assign((size_t)n * K, 1.0f);
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < n; ++i) {
+        for (int tt = 0; tt < K; ++tt) {
+          float d = inst.knn_dist[(size_t)i * K + tt];
+          eta[(size_t)i * K + tt] = std::pow(1.0f / (d + 1e-9f), (float)p.beta);
+        }
+      }
+    }
 
     std::vector<std::vector<int>> ant_tours(p.ants, std::vector<int>(n));
     std::vector<double> ant_len(p.ants);
@@ -125,8 +127,13 @@ class ACOSolver {
     std::vector<uint32_t> seeds(p.ants);
     for (int a = 0; a < p.ants; ++a) seeds[a] = p.seed + 7919u * a + 17u;
 
-    std::vector<double> pow_tau_cache;
-    (void)pow_tau_cache;
+    auto deposit_edge = [&](std::vector<float>& T, int u, int v, float q) {
+      if (K <= 0) return;
+      const int* row = &inst.knn_idx[(size_t)u * K];
+      for (int tt = 0; tt < K; ++tt)
+        if (row[tt] == v) { T[(size_t)u * K + tt] += q; return; }
+      // arista fuera de candidatos: se ignora (ahorro de memoria)
+    };
 
     for (int it = 0; it < p.iters; ++it) {
       #pragma omp parallel for schedule(dynamic, 1)
@@ -138,33 +145,47 @@ class ACOSolver {
         int start = (int)(rng() % (uint32_t)n);
         tour.push_back(start); vis[start] = 1;
         int cur = start;
-        std::vector<double> probs;
-        std::vector<int> cands;
-        probs.reserve(64); cands.reserve(64);
+        // buffers reutilizados por paso (sin alloc dentro del loop caliente)
+        std::vector<int> cands; cands.reserve(64);
+        std::vector<float> probs; probs.reserve(64);
         for (int step = 1; step < n; ++step) {
           cands.clear(); probs.clear();
           double sum = 0;
-          // 1) intenta lista de candidatos no visitados
-          if (!inst.cand.empty()) {
-            for (int c : inst.cand[cur]) if (!vis[c]) { cands.push_back(c); }
+          if (K > 0) {
+            const int* row = &inst.knn_idx[(size_t)cur * K];
+            for (int tt = 0; tt < K; ++tt) {
+              int c = row[tt];
+              if (!vis[c]) {
+                float tauv = tau[(size_t)cur * K + tt];
+                float tp = (p.alpha == 1.0) ? tauv : std::pow(tauv, (float)p.alpha);
+                float v = tp * eta[(size_t)cur * K + tt];
+                cands.push_back(c);
+                probs.push_back(v);
+                sum += v;
+              }
+            }
           }
-          // 2) si lista vacia o todos visitados: usa todos los no visitados
-          //    (para n<=2000 es OK; para n grande este solver no se usa)
-          if (cands.empty()) {
-            for (int j = 0; j < n; ++j) if (!vis[j]) cands.push_back(j);
-          }
-          for (int c : cands) {
-            double t = std::pow((double)TAU(cur, c), p.alpha);
-            double e = std::pow(1.0 / ((double)inst.dist(cur, c) + 1e-9), p.beta);
-            double v = t * e;
-            probs.push_back(v); sum += v;
-          }
-          int nxt = cands.back();
-          double r = uni(rng) * sum;
-          double acc = 0;
-          for (size_t k = 0; k < cands.size(); ++k) {
-            acc += probs[k];
-            if (acc >= r) { nxt = cands[k]; break; }
+          int nxt = -1;
+          if (!cands.empty()) {
+            double r = uni(rng) * sum;
+            double acc = 0;
+            nxt = cands.back();
+            if (sum > 0 && std::isfinite(sum)) {
+              for (size_t k = 0; k < cands.size(); ++k) {
+                acc += probs[k];
+                if (acc >= r) { nxt = cands[k]; break; }
+              }
+            } else {
+              nxt = cands[rng() % cands.size()];
+            }
+          } else {
+            // Fallback sin alloc: vecino mas cercano entre no visitados.
+            // O(n) por paso, pero solo ocurre al final del tour.
+            float bd = std::numeric_limits<float>::max();
+            for (int j = 0; j < n; ++j) if (!vis[j]) {
+              float d = inst.dist(cur, j);
+              if (d < bd) { bd = d; nxt = j; }
+            }
           }
           tour.push_back(nxt); vis[nxt] = 1; cur = nxt;
         }
@@ -191,22 +212,24 @@ class ACOSolver {
         tau_min = tau_max / (2.0 * n);
       }
 
-      // evaporacion
-      #pragma omp parallel for schedule(static)
-      for (size_t k = 0; k < tau.size(); ++k) tau[k] *= (float)(1.0 - p.rho);
+      if (K > 0) {
+        float decay = (float)(1.0 - p.rho);
+        #pragma omp parallel for schedule(static)
+        for (size_t k = 0; k < tau.size(); ++k) tau[k] *= decay;
 
-      // deposito: mejor global (MMAS)
-      double dep = 1.0 / (best.length + 1e-300);
-      for (int i = 0; i < n; ++i) {
-        int u = best.tour[i], v = best.tour[(i + 1) % n];
-        TAU(u, v) += (float)dep;
-        TAU(v, u) += (float)dep;
-      }
-      // clamp
-      #pragma omp parallel for schedule(static)
-      for (size_t k = 0; k < tau.size(); ++k) {
-        if (tau[k] > tau_max) tau[k] = (float)tau_max;
-        else if (tau[k] < tau_min) tau[k] = (float)tau_min;
+        // deposito: mejor global (MMAS)
+        float dep = (float)(1.0 / (best.length + 1e-300));
+        for (int i = 0; i < n; ++i) {
+          int u = best.tour[i], v = best.tour[(i + 1) % n];
+          deposit_edge(tau, u, v, dep);
+          deposit_edge(tau, v, u, dep);
+        }
+        float tmax = (float)tau_max, tmin = (float)tau_min;
+        #pragma omp parallel for schedule(static)
+        for (size_t k = 0; k < tau.size(); ++k) {
+          if (tau[k] > tmax) tau[k] = tmax;
+          else if (tau[k] < tmin) tau[k] = tmin;
+        }
       }
 
       if (trace) fprintf(trace, "%d,%.2f\n", it + 1, best.length);

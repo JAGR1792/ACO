@@ -68,15 +68,14 @@ static std::vector<int> nn_tour(const TSPInstance& inst, int start = 0) {
 
 struct FullResult { std::vector<int> tour; double len; };
 
-// ACO denso completo. Requiere matriz n*n.
+// ACO disperso completo. Memoria O(n*k), sin matriz n*n.
 static FullResult run_full(TSPInstance& inst, const Args& a) {
-  double mb = TSPInstance::matrix_mb(inst.n);
-  // cota de seguridad: rehusar si > 400MB (n ~ 10k en float)
-  if (mb > 400.0) {
-    fprintf(stderr, "[ERROR] matriz densa %.1f MB, usa --mode hier para n=%d\n", mb, inst.n);
+  double dense = TSPInstance::dense_mb_theoretical(inst.n);
+  // cota de seguridad sobre la densa teorica (aunque ya no se materializa)
+  if (dense > 400.0 && a.cand_k <= 0) {
+    fprintf(stderr, "[ERROR] n=%d sin candidatos pediria densa %.1f MB, usa --mode hier o --cand 8..25\n", inst.n, dense);
     exit(3);
   }
-  inst.build_matrix();
   if (a.cand_k > 0) inst.build_candidates(a.cand_k);
   ACOParams p;
   p.ants = a.ants; p.iters = a.iters;
@@ -98,10 +97,10 @@ static FullResult run_hier(TSPInstance& inst, const Args& a) {
   int G = (int)std::ceil(std::sqrt((double)n / (double)a.target_cluster));
   if (G < 1) G = 1;
   if (G > 100) G = 100;  // evita miles de celdas diminutas
-  double minx = 1e300, miny = 1e300, maxx = -1e300, maxy = -1e300;
+  double minx = 1e30, miny = 1e30, maxx = -1e30, maxy = -1e30;
   for (auto& pt : inst.pts) {
-    minx = std::min(minx, pt.x); maxx = std::max(maxx, pt.x);
-    miny = std::min(miny, pt.y); maxy = std::max(maxy, pt.y);
+    minx = std::min(minx, (double)pt.x); maxx = std::max(maxx, (double)pt.x);
+    miny = std::min(miny, (double)pt.y); maxy = std::max(maxy, (double)pt.y);
   }
   double wx = (maxx - minx) / G + 1e-9, wy = (maxy - miny) / G + 1e-9;
   std::map<std::pair<int,int>, std::vector<int>> cells;
@@ -128,7 +127,6 @@ static FullResult run_hier(TSPInstance& inst, const Args& a) {
     int iters = (sub.n < 100) ? 15 : 25;
     int ck = std::min(15, sub.n - 1);
     if (sub.n >= 3) {
-      sub.build_matrix();
       if (ck > 0) sub.build_candidates(ck);
       ACOParams p; p.ants = ants; p.iters = iters; p.cand_k = ck;
       p.seed = a.seed + (uint32_t)c * 1009u; p.use_2opt = true;
@@ -148,7 +146,7 @@ static FullResult run_hier(TSPInstance& inst, const Args& a) {
   for (int c = 0; c < C; ++c) {
     double sx = 0, sy = 0;
     for (int g : clusters[c]) { sx += inst.pts[g].x; sy += inst.pts[g].y; }
-    cent[c].x = sx / clusters[c].size(); cent[c].y = sy / clusters[c].size();
+    cent[c].x = (float)(sx / clusters[c].size()); cent[c].y = (float)(sy / clusters[c].size());
   }
   std::vector<char> vis(C, 0);
   std::vector<int> order; order.reserve(C);
@@ -185,10 +183,9 @@ int main(int argc, char** argv) {
   else if (a.mode == "hier") r = run_hier(inst, a);
   else if (a.mode == "nn") {
     auto t = nn_tour(inst, 0);
-    // 2-opt ligero solo si n moderado
+    // 2-opt ligero solo si n moderado (sin matriz: al vuelo)
     if (a.use_2opt && a.n <= 5000) {
       TSPInstance& m = inst;
-      m.build_matrix();
       two_opt(m, t, 1, (a.n > 500 ? 40 : 0));
     }
     r = {t, inst.tour_length(t)};
@@ -198,7 +195,9 @@ int main(int argc, char** argv) {
 
   printf("n=%d mode=%s ants=%d iters=%d seed=%u length=%.2f time_ms=%.1f peak_kb=%ld\n",
     a.n, used.c_str(), a.ants, a.iters, a.seed, r.len, tms, peak);
-  printf("matrix_mb_est=%.2f (solo modo full)\n", TSPInstance::matrix_mb(a.n));
+  printf("dense_mb_teorica=%.2f sparse_mb_est=%.2f (k=%d, solo modo full)\n",
+    TSPInstance::dense_mb_theoretical(a.n),
+    TSPInstance::sparse_mb(a.n, std::min(a.cand_k, a.n - 1)), a.cand_k);
   fflush(stdout);
 
   if (!a.out.empty()) {
