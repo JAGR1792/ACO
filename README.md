@@ -47,19 +47,32 @@ Otros comandos útiles:
 
 | n | Modo | Longitud | Tiempo | Memoria pico |
 |---|--:|---:|---:|---:|
-| 20 | full (k=8) | 4460.31 | 0.05 s | 4.6 MB |
-| 2000 | full (k=25) | 38762.69 | 0.38 s | 5.7 MB |
-| 200000 | hier (361 celdas) | 412373.13 | 2.69 s | 11.7 MB |
+| 20 | full (k=8) | 4460.31 | 0.13 s | 4.5 MB |
+| 2000 | full (k=25) | 38762.69 | 0.42 s | 5.4 MB |
+| 200000 | hier (361 celdas) | 412373.13 | 2.39 s | 11.4 MB |
 
-Las longitudes corresponden a la muestra reproducible con la semilla indicada. Los tiempos y memorias son de una ejecución de ejemplo (Arch Linux, 12 núcleos, 14 GB RAM, `g++ 16.2.1`) y cambian según el equipo. Tras el híbrido disperso (`n×k`, sin matriz densa) la memoria baja ~9× en `n=2000` y ~6× en `n=200k`, y el tiempo ~3× (eta precalculada, sin `pow()` por paso, fallback sin alloc).
+Las longitudes corresponden a la muestra reproducible con la semilla indicada. Los tiempos y memorias son de una ejecución de ejemplo (Arch Linux, 12 núcleos, 14 GB RAM, `g++ 16.2.1`) y cambian según el equipo.
+
+### Cuánto más eficiente es el híbrido disperso
+
+Comparado con la versión densa anterior (`mat n×n` + `tau n×n`, mismo `m`, `t`, `k`, semilla 42):
+
+| n | Tiempo antes → ahora | Memoria antes → ahora | Longitud |
+|---|--:|--:|--:|
+| 20 | 0.14 s → 0.13 s (~1.1×) | 4.4 MB → 4.5 MB (~igual) | 4460.31 (=) |
+| 2000 | 1.22 s → 0.42 s (~2.9×) | 52.0 MB → 5.4 MB (~9.6×) | 38698.88 → 38762.69 (+0.2 %) |
+| 5000 | 4.26 s → 1.10 s (~3.9×) | 300.2 MB → 7.1 MB (~42×) | 61513.34 → 61633.25 (+0.2 %) |
+| 200000 | 6.99 s → 2.39 s (~2.9×) | 75.0 MB → 11.4 MB (~6.6×) | 408901.41 → 412373.13 (+0.8 %) |
+
+De dónde sale la ganancia: sin matriz `n×n` (distancias al vuelo), feromona `n×k` en vez de `n×n`, `eta=(1/d)^beta` precalculada (sin `pow()` por paso), y fallback al vecino más cercano sin alloc. Se pierde <1 % de calidad porque las aristas fuera de candidatos ya no reciben feromona — lo compensa el 2-opt.
 
 ![Tiempo, memoria pico y longitud del tour para los tres tamaños](img/benchmark.png)
 
-De 20 a 2000 ciudades (×100 en `n`) el tiempo solo sube ×8 gracias a los candidatos, y la memoria (5.7 MB) refleja el `O(n·k)` disperso: `idx+dist+tau+eta` (~0.76 MB teóricos en `n=2000,k=25` + puntos y overhead de hilos). El caso de 200000 se resuelve en ~2.7 s y ~11.7 MB porque nunca se construye la matriz global (pediría ~152 GB por matriz densa); cada celda aloja estructuras de ~600×15. Las longitudes no son comparables entre tamaños porque cada `n` usa una instancia distinta; para comparar variantes hay que fijar el mismo `n` y `--seed`.
+De 20 a 2000 ciudades (×100 en `n`) el tiempo solo sube ×3 gracias a los candidatos, y la memoria (5.4 MB) refleja el `O(n·k)` disperso: `idx+dist+tau+eta` (~0.76 MB teóricos en `n=2000,k=25` + puntos y overhead de hilos). El escalamiento lo confirma: `5000` ciudades en 1.10 s y 7.1 MB (antes 4.26 s y 300 MB). El caso de 200000 se resuelve en ~2.4 s y ~11.4 MB porque nunca se construye la matriz global (pediría ~152 GB por matriz densa); cada celda aloja estructuras de ~600×15. Las longitudes no son comparables entre tamaños porque cada `n` usa una instancia distinta; para comparar variantes hay que fijar el mismo `n` y `--seed`.
 
 ![Convergencia del mejor tour por iteración](img/convergencia.png)
 
-La curva de `n = 20` baja 10.4 % y se estabiliza hacia la iteración 30 (las 70 restantes sobran). La de `n = 2000` es plana: la colonia no supera al greedy y el salto final lo da el 2-opt, lo que indica invertir en hormigas/2-opt y no en más iteraciones.
+La curva de `n = 20` baja 10.4 % y se estabiliza hacia la iteración 30 (las 70 restantes sobran). La de `n = 2000` ahora sí aprende: baja de 40303 a 39415 durante las 50 iters y el 2-opt final la lleva a 38762 (antes era plana en 40303 y todo lo hacía el 2-opt). Aun así conviene invertir en hormigas/2-opt y no en muchas más iteraciones.
 
 ![Escalamiento con rectas de referencia O(n) y O(n²)](img/escalamiento.png)
 
@@ -67,7 +80,7 @@ Con `k` fijo el tiempo sigue la recta `O(n)` y la memoria la `O(n·k)`; el punto
 
 ![Sensibilidad a k en n=2000](img/candidatos.png)
 
-La longitud no cambia con `k = 5..50` (el 2-opt corrige todo), pero sin 2-opt empeora 4 %. En `n = 200`, `k = 0` tarda el doble (139.8 ms vs 68.2 ms) que `k = 10`: la lista acelera sin degradar.
+La longitud ahora sí depende de `k` (37672 con `k=5`, 38531 con `k=15`, 38762 con `k=25`, 39283 con `k=50`): con feromona dispersa las aristas fuera de candidatos no aprenden, así que `k` chico concentra mejor el aprendizaje en esta instancia. Sin 2-opt sube a 40303 (+4 %). En `n = 200`, `k = 0` tarda más del doble (72.7 ms vs 29.3 ms) que `k = 10`: la lista acelera sin degradar.
 
 ## Complejidad computacional
 

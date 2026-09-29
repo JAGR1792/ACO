@@ -131,8 +131,9 @@ $n$ y la misma semilla).
 \item \textbf{2-opt:} arreglo final que prueba a reconectar pares de caminos
 cruzados; si el tour se acorta, se queda con el cambio. Explica buena parte de
 la calidad obtenida.
-\item \textbf{Modo full:} el ACO normal con la tabla completa de distancias.
-Solo cabe en memoria hasta algunos miles de ciudades.
+\item \textbf{Modo full:} el ACO disperso con k-NN ($O(n \cdot k)$ en memoria).
+Solo cabe en memoria hasta algunos miles de ciudades en su versión densa; en
+la versión actual ya no usa matriz $n \times n$.
 \item \textbf{Modo hier:} el modo por partes para 200000 ciudades: parte el
 mapa en cuadros, resuelve cada cuadro por separado y pega los recorridos.
 \item \textbf{Celda o cluster:} cada cuadro del mapa partido. En nuestro caso
@@ -144,10 +145,11 @@ ciudades). Cuadros más chicos = más rápido pero uniones más bruscas.
 \item \textbf{time\_ms:} tiempo que tardó el experimento, en milésimas de
 segundo. Depende del computador.
 \item \textbf{peak\_kb:} máxima memoria usada, en kilobytes. Depende del
-computador, pero el orden de magnitud ($O(n^2)$ vs $O(n)$) no.
+computador, pero el orden de magnitud ($O(n \cdot k)$ vs $O(n^2)$) no.
 \item \textbf{matrix\_mb\_est:} cuánta memoria pediría la tabla completa de
 distancias. Para 200000 marca $\approx 152588$ MB: la prueba de que el modo
-normal es imposible ahí.
+denso es imposible ahí. El programa ahora reporta además
+\texttt{sparse\_mb\_est} ($O(n \cdot k)$).
 \item \textbf{C++:} el lenguaje en que se escribió el programa. Se eligió
 porque es compilado (rápido): un experimento que en Python tardaría minutos
 aquí tarda segundos.
@@ -341,7 +343,7 @@ Cuadro 3: Modos del programa.
 \toprule
 Modo & Uso & Descripción \\
 \midrule
-\texttt{full} & $n \le 5000$ & ACO denso: matriz $n \times n$ + k-NN + MMAS + 2-opt \\
+\texttt{full} & $n \le 5000$ & ACO disperso: k-NN $n \times k$ + MMAS + 2-opt (sin matriz $n \times n$) \\
 \texttt{hier} & $n$ grande & Jerárquico: rejilla $\to$ ACO por celda $\to$ unión por centroides \\
 \texttt{nn} & referencia & Vecino más cercano greedy (+ 2-opt si $n \le 5000$) \\
 \texttt{auto} & defecto & \texttt{full} si $n \le 5000$, \texttt{hier} en otro caso \\
@@ -350,11 +352,13 @@ Modo & Uso & Descripción \\
 \end{center}
 
 El modo \texttt{hier} es necesario para 200000 ciudades: una matriz densa de
-$200000^2$ valores en \texttt{float} ocuparía $\approx 149$ GB \textbf{por
-matriz} (el programa lo reporta como \texttt{matrix\_mb\_est}), imposible en
+$200000^2$ valores en \texttt{float} ocuparía $\approx 152$ GB \textbf{por
+matriz} (el programa lo reporta como \texttt{dense\_mb\_teorica}), imposible en
 local. En su lugar se particiona el plano en una rejilla de celdas de
 $\approx 600$ puntos, se corre un ACO pequeño e independiente por celda y se
-concatenan los subtours ordenando las celdas por centroide.
+concatenan los subtours ordenando las celdas por centroide. Desde el híbrido,
+incluso el modo \texttt{full} ya no construye esa matriz: usa distancias al
+vuelo y feromona dispersa $n \times k$.
 
 \subsection{Qué significa el modo jerárquico, paso a paso}
 
@@ -375,8 +379,8 @@ $361$ celdas con $\approx 550$ ciudades cada una. Esto lo muestra la línea
 \item \textbf{ACO por celda.} Cada celda se resuelve como un TSP independiente
 con el mismo algoritmo MMAS + 2-opt, pero en pequeño: $\approx 10$ hormigas,
 $15$--$25$ iteraciones y $k = 15$ candidatos. Esto significa que cada celda
-usa matrices de $\approx 600 \times 600$ ($\approx 1,4$ MB) en vez de una
-matriz global de $200000 \times 200000$. Las celdas se resuelven en paralelo
+usa estructuras dispersas de $\approx 600 \times 15$ ($\approx 0,14$ MB) en vez de
+una matriz global de $200000 \times 200000$. Las celdas se resuelven en paralelo
 con OpenMP.
 \item \textbf{Orden de las celdas.} Se calcula el centroide (punto promedio) de
 cada celda y se ordenan las celdas con vecino más cercano entre centroides.
@@ -412,25 +416,26 @@ lista. Con los valores del experimento ($t = 50$, $m = 25$, $k = 25$), el
 trabajo crece linealmente con $n$, como confirma la recta de referencia
 $O(n)$ en la gráfica de escalamiento.
 
-\textbf{Memoria en modo \texttt{full}.} Dos matrices densas de $n \times n$ en
-\texttt{float} (distancias + feromona): $2 \cdot n^2 \cdot 4$ bytes, o sea
-$O(n^2)$. Más el k-NN ($n \cdot k$ enteros) y los tours ($m \cdot n$ enteros),
-despreciables frente a las matrices. Verificación con números: para
-$n = 2000$, $2 \cdot 2000^2 \cdot 4 = 32$ MB teóricos y el programa midió 52
-MB pico (el resto son hilos OpenMP y estructuras auxiliares). Para
-$n = 5000$: $200$ MB teóricos, $300$ MB medidos. Para $n = 200000$:
-$2 \cdot 200000^2 \cdot 4 \approx 298$ GB ($\approx 149$ GB por matriz),
-imposible en local: por eso el programa se niega a usar \texttt{full} ahí. La
-gráfica de memoria valida el $O(n^2)$ con su recta de referencia, mientras el
-punto \texttt{hier} queda muy por debajo de ella.
+\textbf{Memoria en modo \texttt{full}.} Cuatro arreglos dispersos de $n \times k$
+(\texttt{knn\_idx} en \texttt{int} + \texttt{knn\_dist}, \texttt{tau} y
+\texttt{eta} en \texttt{float}): $4 \cdot n \cdot k \cdot 4$ bytes, o sea
+$O(n \cdot k)$. Más los tours ($m \cdot n$ enteros), despreciables.
+Verificación con números: para $n = 2000, k = 25$, $4 \cdot 2000 \cdot 25
+\cdot 4 = 0,76$ MB teóricos y el programa midió 5,4 MB pico (el resto son
+puntos, hilos OpenMP y auxiliares). Para $n = 5000$: $3,05$ MB teóricos,
+$7,1$ MB medidos (antes: $200$ MB teóricos densos, $300$ MB medidos, o sea
+$\times 42$ menos). Para $n = 200000$: la densa teórica
+$2 \cdot 200000^2 \cdot 4 \approx 305$ GB ($\approx 152$ GB por matriz),
+imposible en local. La gráfica de memoria valida el $O(n \cdot k)$ con su
+recta de referencia, mientras el punto \texttt{hier} queda aún por debajo.
 
 \textbf{Modo \texttt{hier}.} Con $C$ celdas de $\approx c$ ciudades
 ($C \approx n/c$), cada celda cuesta un ACO completo pequeño
 $O(t_c \cdot m_c \cdot c \cdot k)$; el total es
 $C$ veces eso, o sea proporcional a $n$ (lineal) con constantes pequeñas.
 Ordenar las $C$ celdas por centroide cuesta $O(C^2)$, despreciable
-($C = 361$). En memoria solo vive el vector de $n$ puntos, $O(n)$, más una
-celda a la vez en cada hilo, $O(c^2)$ con $c \approx 600$.
+($C = 361$). En memoria solo vive el vector de $n$ puntos en \texttt{float},
+$O(n)$, más una celda dispersa $O(c \cdot k)$ por hilo.
 
 Las hormigas de cada iteración se construyen en paralelo con OpenMP (reparte
 tiempo entre núcleos, no cambia el Big-O).
@@ -461,18 +466,26 @@ Los detalles de cada comando están en el \texttt{README} del repositorio.
 Máquina: Arch Linux, 12 núcleos, 14 GB RAM, \texttt{g++ 16.2.1}, OpenMP.
 Semilla 42 en los tres casos.
 
-Cuadro 4: Desempeño en tiempo y memoria.
+Cuadro 4: Desempeño en tiempo y memoria (híbrido disperso).
 \begin{center}
 \begin{tabular}{cccccc}
 \toprule
 $n$ & Modo & Hormigas $\times$ iters & Longitud & Tiempo & Memoria pico \\
 \midrule
-20 & full (k=8) & $20 \times 100$ & 4460,31 & 0,14 s & 4,4 MB \\
-2000 & full (k=25) & $25 \times 50$ & 38698,88 & 1,22 s & 52,0 MB \\
-200000 & hier (361 celdas) & $10 \times 25$ por celda & 408901,41 & 6,99 s & 75,0 MB \\
+20 & full (k=8) & $20 \times 100$ & 4460,31 & 0,13 s & 4,5 MB \\
+2000 & full (k=25) & $25 \times 50$ & 38762,69 & 0,42 s & 5,4 MB \\
+200000 & hier (361 celdas) & $10 \times 25$ por celda & 412373,13 & 2,39 s & 11,4 MB \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+Frente a la versión densa anterior (misma semilla 42): en $n = 2000$ el tiempo
+bajó de 1,22 s a 0,42 s ($\times 2,9$) y la memoria de 52,0 MB a 5,4 MB
+($\times 9,6$); en $n = 5000$ de 4,26 s a 1,10 s ($\times 3,9$) y de 300 MB a
+7,1 MB ($\times 42$); en $n = 200000$ de 6,99 s a 2,39 s ($\times 2,9$) y de
+75,0 MB a 11,4 MB ($\times 6,6$). La calidad se mantiene dentro del 1\,\%:
+$38698,88 \to 38762,69$ (+0,2\,\%) en $n = 2000$ y
+$408901,41 \to 412373,13$ (+0,8\,\%) en $n = 200000$.
 
 \begin{center}
 \includegraphics[width=0.95\linewidth]{../img/benchmark.png}
@@ -485,23 +498,23 @@ Figura 2: Tiempo, memoria pico y longitud del tour para los tres tamaños.
 La Figura 2 tiene tres diagramas de barras, uno por métrica, con una barra por
 tamaño (20, 2000 y 200000). Se leen así:
 
-\textbf{Gráfica 1: Tiempo (s).} Las barras crecen de 0,14 s a 1,22 s y a 6,99
+\textbf{Gráfica 1: Tiempo (s).} Las barras crecen de 0,13 s a 0,42 s y a 2,39
 s. Esto significa que multiplicar las ciudades por 100 (de 20 a 2000) solo
-multiplica el tiempo por 9: el crecimiento es subcuadrático gracias a los
-candidatos. La barra de 200000 ($\approx 7$ s) es la prueba visual de que el
-modo jerárquico rompe la barrera del $O(n^2)$: sin él, esa barra ni siquiera
-podría existir porque el programa no cabría en memoria.
+multiplica el tiempo por 3: el crecimiento es subcuadrático gracias a los
+candidatos y a la \texttt{eta} precalculada. La barra de 200000 ($\approx 2,4$ s)
+es la prueba visual de que el modo jerárquico + dispersión rompen la barrera
+del $O(n^2)$: sin ellos, esa barra ni siquiera podría existir porque el programa
+no cabría en memoria.
 
-\textbf{Gráfica 2: Memoria pico (MB).} Las barras marcan 4,4 MB, 52 MB y 75
-MB. Esto significa dos cosas: entre 20 y 2000 la memoria sí sigue al $O(n^2)$
-de las matrices (las barras crecen fuerte), pero entre 2000 y 200000 apenas
-sube de 52 a 75 MB a pesar de haber $\times 100$ ciudades. Esa segunda
-transición plana es la huella del diseño jerárquico: la memoria deja de
-depender de $n^2$ y pasa a depender de $n$ (el vector de puntos) más celdas de
-tamaño fijo.
+\textbf{Gráfica 2: Memoria pico (MB).} Las barras marcan 4,5 MB, 5,4 MB y 11,4
+MB. Esto significa que la memoria ya no sigue al $O(n^2)$ de las matrices
+densas: entre 20 y 2000 apenas sube (de 4,5 a 5,4 MB) y entre 2000 y 200000
+solo sube a 11,4 MB a pesar de haber $\times 100$ ciudades. Esa curva plana es
+la huella del diseño disperso $O(n \cdot k)$ + jerárquico: la memoria depende
+de $n \cdot k$ (más el vector de puntos) y no de $n^2$.
 
-\textbf{Gráfica 3: Longitud del tour.} Las barras crecen (4460, 38699,
-408901) simplemente porque hay más ciudades que visitar en el mismo mapa de
+\textbf{Gráfica 3: Longitud del tour.} Las barras crecen (4460, 38762,
+412373) simplemente porque hay más ciudades que visitar en el mismo mapa de
 $1000 \times 1000$. Esto significa que esta gráfica no mide calidad del
 algoritmo sino tamaño de la instancia: cada barra viene de puntos aleatorios
 distintos, así que no se puede decir que una configuración sea mejor que otra
@@ -524,12 +537,12 @@ Figura 3: Mejor longitud global por iteración, n=20 y n=2000.
 
 Con $n = 20$ la curva baja de 4975 a 4460 (10,4\,\% de mejora) y se estabiliza
 alrededor de la iteración 30: esto significa que las últimas 70 iteraciones
-aportaron casi nada y con $t_{\max} = 30$ bastaba. Con $n = 2000$ la curva es
-plana en 40303 durante las 50 iteraciones y el salto a 38698 lo produce el
-2-opt final de 2 pasadas: esto significa que, con estos parámetros, la colonia
-no superó al tour greedy inicial y el trabajo lo hizo la mejora local. El
-valor de saberlo es directo: para $n = 2000$ conviene invertir en más
-hormigas o más 2-opt y no en más iteraciones.
+aportaron casi nada y con $t_{\max} = 30$ bastaba. Con $n = 2000$ la curva
+baja de 40303 a 39415 durante las 50 iteraciones y el 2-opt final de 2 pasadas
+la lleva a 38762: esto significa que, con feromona dispersa, la colonia sí
+aprende (antes era plana en 40303 y todo lo hacía el 2-opt). El valor de
+saberlo es directo: aun así conviene invertir en más hormigas o más 2-opt y
+no en muchas más iteraciones.
 
 \subsection{Escalamiento en tiempo y memoria (Figura 4)}
 
@@ -551,12 +564,13 @@ $O(n^2)$, más el punto jerárquico de 200000.
 
 En tiempo, los puntos \texttt{full} siguen la recta de referencia $O(n)$:
 esto significa que, con $k$ fijo, duplicar las ciudades duplica el tiempo
-($100 \to 5000$ ciudades: 0,2 s $\to$ 4,3 s), tal como predice
+($100 \to 5000$ ciudades: 0,04 s $\to$ 1,10 s), tal como predice
 $O(t \cdot m \cdot n \cdot k)$. En memoria, los puntos \texttt{full} siguen la
-referencia $O(n^2)$ ($5000$ ciudades $\Rightarrow$ $300$ MB medidos frente a
-$200$ MB teóricos de matrices). El punto \texttt{hier} ($200000$ ciudades,
-$7$ s, $75$ MB) queda muy por debajo de ambas rectas: es la prueba empírica
-de que el particionado rompe el $O(n^2)$.
+referencia $O(n \cdot k)$ ($5000$ ciudades $\Rightarrow$ $7,1$ MB medidos frente a
+$3,05$ MB teóricos dispersos; la densa teórica pediría $200$ MB). El punto
+\texttt{hier} ($200000$ ciudades, $2,39$ s, $11,4$ MB) queda muy por debajo de
+ambas rectas densas: es la prueba empírica de que dispersión + particionado
+rompen el $O(n^2)$.
 
 \subsection{Sensibilidad a la lista de candidatos (Figura 5)}
 
@@ -573,14 +587,15 @@ justifica con datos la lista de candidatos en vez de usarla por fe.
 Figura 5: Tiempo y longitud según $k$ (n=2000), con variante sin 2-opt.
 \end{center}
 
-La longitud es idéntica (38698,88) para $k = 5, 15, 25, 50$: esto significa
-que, en esta instancia, el 2-opt final corrige cualquier tour inicial y $k$
-pequeño no pierde calidad. En cambio, sin 2-opt la longitud sube a 40303
-(+4\,\%): esto significa que la mejora local aporta más calidad que cualquier
-valor de $k$. En la demo $n = 200$, $k = 0$ tarda $139,8$ ms frente a $68,2$
-ms con $k = 10$ ($\times 2$ más lento) con igual calidad: esto significa que
-la lista de candidatos acelera sin degradar, y el factor crecería con $n$
-porque el paso pasa de $O(n)$ a $O(k)$.
+La longitud ahora depende de $k$ (37672 con $k = 5$, 38531 con $k = 15$,
+38762 con $k = 25$, 39283 con $k = 50$): esto significa que, con feromona
+dispersa, las aristas fuera de candidatos no reciben refuerzo y $k$ chico
+concentra mejor el aprendizaje en esta instancia. En cambio, sin 2-opt la
+longitud sube a 40303 (+4\,\%): esto significa que la mejora local aporta más
+calidad que cualquier valor de $k$. En la demo $n = 200$, $k = 0$ tarda
+$72,7$ ms frente a $29,3$ ms con $k = 10$ ($\times 2,5$ más lento) con calidad
+similar: esto significa que la lista de candidatos acelera sin degradar, y el
+factor crecería con $n$ porque el paso pasa de $O(n)$ a $O(k)$.
 
 \subsection{Por qué 25 hormigas y 50 iteraciones (Cuadro 5)}
 
@@ -596,57 +611,61 @@ Cuadro 5: Sensibilidad a hormigas (con $t = 50$) e iteraciones (con $m = 25$).
 \toprule
 Configuración & Longitud & Tiempo & Memoria \\
 \midrule
-$m = 10$ & 38698,88 & 0,63 s & 51,7 MB \\
-$m = 25$ & 38698,88 & 0,78 s & 51,6 MB \\
-$m = 50$ & 38698,88 & 1,12 s & 52,0 MB \\
+$m = 10$ & 39208,83 & 0,23 s & 5,5 MB \\
+$m = 25$ & 38762,69 & 0,34 s & 5,4 MB \\
+$m = 50$ & 39359,31 & 0,46 s & 5,7 MB \\
 \midrule
-$t = 10$ & 38698,88 & 0,32 s & 51,8 MB \\
-$t = 30$ & 38698,88 & 0,86 s & 51,9 MB \\
-$t = 50$ & 38698,88 & 1,48 s & 51,8 MB \\
-$t = 100$ & 38585,53 & 2,99 s & 51,9 MB \\
+$t = 10$ & 38698,88 & 0,10 s & 5,5 MB \\
+$t = 30$ & 38698,88 & 0,34 s & 5,5 MB \\
+$t = 50$ & 38762,69 & 0,36 s & 5,3 MB \\
+$t = 100$ & 38188,64 & 0,54 s & 5,4 MB \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-De 10 a 50 hormigas la calidad no se mueve: esto significa que, con MMAS
-(donde solo la mejor deposita), las hormigas extra muestrean lo mismo más
-caro. Se eligió $m = 25$ y no 10 como margen de seguridad (cuesta solo
-+24\,\% de tiempo) para instancias o semillas donde la colonia sí aporte; 50
-es desperdicio puro (+78\,\% por +0\,\%).
+De 10 a 50 hormigas la calidad varía poco y $m = 50$ incluso empeora por azar:
+esto significa que, con MMAS (donde solo la mejor deposita), las hormigas
+extra muestrean lo mismo más caro. Se mantiene $m = 25$ como margen de
+seguridad frente a $m = 10$ para instancias o semillas donde la colonia sí
+aporte; 50 es desperdicio puro.
 
-De 10 a 50 iteraciones tampoco hay ganancia (manda el greedy + 2-opt); con
-$t = 100$ aparece una mejora marginal de +0,3\,\% al doble de costo. Se eligió
-$t = 50$ como punto medio: da espacio al aprendizaje de feromona (en $n = 20$
-la colonia sí mejoró hasta la iteración $\approx 30$) sin pagar el doble por
-décimas. La memoria, como predice el análisis, no depende ni de $m$ ni de $t$
-($\approx 52$ MB en todas las filas: las matrices son las mismas).
+De 10 a 50 iteraciones la ganancia es pequeña; con $t = 100$ aparece una
+mejora de $-1,5$\,\% (38188) al $\times 1,5$ de costo. Se mantiene $t = 50$
+como punto medio: da espacio al aprendizaje de feromona (en $n = 20$ la
+colonia mejoró hasta la iteración $\approx 30$, y en $n = 2000$ ahora baja de
+40303 a 39415) sin pagar de más. La memoria, como predice el análisis, no
+depende ni de $m$ ni de $t$ ($\approx 5,5$ MB en todas las filas: las
+estructuras $n \times k$ son las mismas).
 
 \subsection{Análisis de resultados}
 
 \textbf{a) ¿Cómo escala el tiempo?}
-De 20 a 2000 ciudades ($\times 100$ en $n$) el tiempo solo sube de 0,14 s a
-1,22 s ($\times 9$), gracias a la lista de candidatos: cada paso cuesta $O(k)$
-en vez de $O(n)$. El caso de 200000 se resuelve en $\approx 7$ s porque el
+De 20 a 2000 ciudades ($\times 100$ en $n$) el tiempo solo sube de 0,13 s a
+0,42 s ($\times 3$), gracias a la lista de candidatos y a la \texttt{eta}
+precalculada: cada paso cuesta $O(k)$ en vez de $O(n)$ y sin \texttt{pow()} por
+candidata. El caso de 200000 se resuelve en $\approx 2,4$ s porque el
 trabajo se divide en 361 ACOs de $\approx 550$ puntos (costo casi lineal en
 $n$) más el ordenado de centroides $O(C^2)$ con $C = 361$, despreciable. Sin el
-enfoque jerárquico, un ACO denso en 200000 ciudades sería intratable en tiempo
-($O(t_{\max} \cdot m \cdot n^2)$ por iteración).
+enfoque jerárquico + disperso, un ACO denso en 200000 ciudades sería intratable
+en tiempo y memoria ($O(t_{\max} \cdot m \cdot n^2)$ por iteración).
 
 \textbf{b) ¿Cómo escala la memoria?}
-Con $n = 20$ se usan 4,4 MB (sobrecarga base del proceso y los hilos OpenMP;
-las matrices de $20 \times 20$ son insignificantes). Con $n = 2000$ se usan
-52 MB: $\approx 15$ MB de distancias + $\approx 15$ MB de feromona + k-NN y
-tours de 25 hormigas, coherente con el $O(n^2)$ teórico. Con $n = 200000$ se
-usan solo 75 MB: nunca se construye la matriz global (que pediría $\approx 149$
-GB por matriz); cada celda aloja matrices de $\approx 600 \times 600$
-($\approx 1,4$ MB) y el resto es el vector de 200000 puntos. El diseño
-jerárquico cambia la memoria de $O(n^2)$ a $O(n)$.
+Con $n = 20$ se usan 4,5 MB (sobrecarga base del proceso y los hilos OpenMP;
+las estructuras de $20 \times 8$ son insignificantes). Con $n = 2000$ se usan
+5,4 MB: $\approx 0,76$ MB teóricos dispersos ($\approx 0,19$ MB por arreglo
+$\times 4$) más puntos y tours, coherente con el $O(n \cdot k)$ teórico
+(antes: 52 MB densos). Con $n = 200000$ se usan solo 11,4 MB: nunca se
+construye la matriz global (que pediría $\approx 152$ GB por matriz); cada
+celda aloja estructuras de $\approx 600 \times 15$ ($\approx 0,14$ MB) y el
+resto es el vector de 200000 puntos en \texttt{float}. El diseño disperso +
+jerárquico cambia la memoria de $O(n^2)$ a $O(n \cdot k)$.
 
 \textbf{c) ¿Qué aportan los candidatos y el 2-opt?}
 Son los que más mejoran la relación calidad/tiempo: los candidatos reducen el
 paso de $O(n)$ a $O(k)$ y el 2-opt corrige cruces del tour construido por las
 hormigas. Desactivarlos (\texttt{--cand 0}, \texttt{--no-2opt}) empeora la
-longitud, el tiempo o ambos.
+longitud, el tiempo o ambos. Con feromona dispersa, $k$ además concentra el
+aprendizaje: en $n = 2000$, $k = 5$ dio 37672 frente a 39283 con $k = 50$.
 
 \textbf{d) ¿Son comparables las longitudes entre tamaños?}
 No directamente: cada $n$ usa una instancia aleatoria distinta (más ciudades
@@ -655,19 +674,21 @@ con/sin 2-opt) hay que fijar el mismo $n$ y \texttt{--seed} y mirar la columna
 \texttt{length} del CSV.
 
 \textbf{e) ¿Qué configuración se recomienda?}
-Para miles de ciudades, ACO denso con $k \approx 25$ y 2-opt activado (caso
-$n = 2000$: 1,2 s y 52 MB). Para cientos de miles, el esquema jerárquico con
-celdas de $\approx 600$ puntos ($\approx 7$ s y 75 MB), aceptando que la unión
-greedy de subtours sacrifica optimalidad global. Trabajo futuro: orientar y
-coser subtours vecinos en vez de concatenar, y 2-opt entre celdas.
+Para miles de ciudades, ACO disperso con $k \approx 5$--$25$ y 2-opt activado
+(caso $n = 2000$: 0,42 s y 5,4 MB). Para cientos de miles, el esquema
+jerárquico con celdas de $\approx 600$ puntos ($\approx 2,4$ s y 11,4 MB),
+aceptando que la unión greedy de subtours sacrifica optimalidad global ($\approx
++0,8$\,\% frente al denso). Trabajo futuro: orientar y coser subtours vecinos
+en vez de concatenar, y 2-opt entre celdas.
 
 \subsection{Conclusión de la evaluación experimental}
 
 \begin{enumerate}
-\item El ACO clásico con matriz densa es viable hasta algunos miles de ciudades
-en local (2000 $\Rightarrow$ 1,2 s, 52 MB).
-\item Para 200000 ciudades el ACO puro es inviable por memoria ($\approx 149$
-GB por matriz); el esquema jerárquico lo hace posible en $\approx 7$ s y 75 MB.
+\item El ACO disperso $O(n \cdot k)$ es viable hasta algunos miles de ciudades
+en local (2000 $\Rightarrow$ 0,42 s, 5,4 MB; 5000 $\Rightarrow$ 1,10 s,
+7,1 MB, $\times 42$ menos memoria que el denso).
+\item Para 200000 ciudades el ACO puro denso es inviable por memoria ($\approx 152$
+GB por matriz); el esquema disperso + jerárquico lo hace posible en $\approx 2,4$ s y 11,4 MB.
 \item Con la misma semilla, la longitud del tour es reproducible en cualquier
 máquina; tiempo y memoria solo son comparables dentro de la misma máquina.
 \end{enumerate}
